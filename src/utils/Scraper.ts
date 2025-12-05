@@ -8,6 +8,7 @@ export async function closeBrowser() {
     // Placeholder
 }
 
+
 export async function getLatestChapter(urlBase: string, ultimoCapConhecido: number): Promise<number> {
     
     let capAtual = ultimoCapConhecido;
@@ -72,5 +73,20 @@ export async function getLatestChapter(urlBase: string, ultimoCapConhecido: numb
         }
     }
     
+    
     return capAtual;
+}
+
+export async function wakeUpRender(): Promise<void> {
+    console.log('[SISTEMA] Tentando acordar o FlareSolverr no Render...');
+    try {
+        // Tenta acessar apenas a raiz para ver se responde (timeout curto de 3 min para garantir o boot)
+        await axios.get(`${FLARESOLVERR_BASE_URL}`, {
+            timeout: 180000 // 3 minutos para o primeiro boot
+        });
+        console.log('[SISTEMA] FlareSolverr está ONLINE e pronto!');
+    } catch (error: any) {
+        console.error(`[SISTEMA] FlareSolverr demorou para responder ou deu erro: ${error.message}`);
+        // Não jogamos erro (throw) para não derrubar o bot, apenas avisamos
+    }
 }

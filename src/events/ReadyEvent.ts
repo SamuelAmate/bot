@@ -1,37 +1,38 @@
 // Em src/events/ReadyEvent.ts
-
 import { createEvent } from '#base';
 import cron from 'node-cron';
 import { monitorMangas } from '../tasks/MonitorManga.js';
 import { loadState } from '../utils/StateManager.js';
+import { wakeUpRender } from '../utils/Scraper.js'; // <--- Importe a nova função
 
 export default createEvent({
-    name: "ready", // nome do evento
-    event: "ready", 
-    once: true,    // roda apenas uma vez
+    name: "ready",
+    event: "ready",
+    once: true,
     
     async run(..._args: any[]) { 
-        
-        // Em um evento Constatic, 'this' é a instância do Cliente (o Bot)
         const bot = this as any; 
         
         if (!bot || !bot.user) {
-            console.error("Instância do bot não encontrada no contexto 'this'.");
+            console.error("Erro no bot.");
             return;
         }
 
         console.log(`Bot online como ${bot.user.tag}`);
-
-        // 1. Carregar o estado
         loadState();
 
-        // 2. Agendar a tarefa de monitoramento a cada 10 minutos
+        // --- MUDANÇA AQUI ---
+        // 1. Tenta acordar o Render antes de começar a monitorar
+        await wakeUpRender();
+
+        // 2. Agora sim roda a verificação
+        console.log('[INIT] Rodando primeira verificação...');
+        monitorMangas(bot);
+
+        // 3. Cron Job
         cron.schedule('*/10 * * * *', () => {
             console.log('[CRON] Iniciando monitoramento de mangás...');
             monitorMangas(bot); 
         });
-
-        // Opcional: Roda a primeira vez imediatamente
-        monitorMangas(bot);
     }
 });
