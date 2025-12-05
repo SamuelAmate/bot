@@ -20,15 +20,15 @@ export async function getLatestChapter(urlBase: string, ultimoCapConhecido: numb
         console.log(`[REQ] Solicitando ao FlareSolverr (Render): ${urlParaTestar}`);
 
         try {
-            // AQUI ESTÁ O SEGREDO:
-            // O código monta: https://seubot.onrender.com + /v1
             const response = await axios.post(`${FLARESOLVERR_BASE_URL}/v1`, {
                 cmd: 'request.get',
                 url: urlParaTestar,
-                maxTimeout: 120000, // 2 min para o Render acordar e processar
-            }, {
+                maxTimeout: 120000,
+                // Adicione esta linha abaixo:
+                postData: "skip_images=true" // Tenta forçar modo leve se suportado, mas o ideal é session.
+                    }, {
                 headers: { 'Content-Type': 'application/json' },
-                timeout: 130000 // Timeout de conexão (2m e 10s)
+                timeout: 130000 
             });
 
             const dados = response.data;
