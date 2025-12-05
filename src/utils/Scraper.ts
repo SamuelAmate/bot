@@ -13,66 +13,66 @@ export async function getLatestChapter(urlBase: string, ultimoCapConhecido: numb
     
     let capAtual = ultimoCapConhecido;
     
-    while (true) {
+    // Tenta no maximo 3 vezes
+    for (let i = 0; i < 3; i++) { 
         const proximoCap = capAtual + 1;
         const urlParaTestar = `${urlBase}${proximoCap}/`;
         
-        console.log(`[REQ] Solicitando ao FlareSolverr (Render): ${urlParaTestar}`);
+        console.log(`[REQ] Tentativa ${i+1}/3 no FlareSolverr: ${urlParaTestar}`);
 
         try {
             const response = await axios.post(`${FLARESOLVERR_BASE_URL}/v1`, {
                 cmd: 'request.get',
                 url: urlParaTestar,
-                maxTimeout: 120000,
-                // Adicione esta linha abaixo:
-                postData: "skip_images=true" // Tenta forçar modo leve se suportado, mas o ideal é session.
-                    }, {
+                maxTimeout: 300000, // 5 minutos (Render é lento)
+                // REMOVIDO O postData QUE CAUSAVA O ERRO
+            }, {
                 headers: { 'Content-Type': 'application/json' },
-                timeout: 130000 
+                timeout: 310000 // 5m e 10s
             });
 
             const dados = response.data;
 
             if (dados.status !== 'ok') {
-                console.error(`[FLARE ERROR] O serviço falhou: ${dados.message}`);
-                // Se der erro 500 no Render, pode ser instabilidade lá
-                break;
+                // Se o erro for "Error: Timeout...", tentamos de novo. Se for outro, logamos.
+                console.error(`[FLARE ERROR] Resposta do servidor: ${dados.message}`);
+                throw new Error(dados.message || "Erro desconhecido no FlareSolverr");
             }
 
             const urlFinal = dados.solution.url;
-
-            // --- Lógica de Validação (Igual ao seu original) ---
-            if (urlFinal === 'https://sakuramangas.org/' ||
-                urlFinal === 'https://sakuramangas.org' ||
-                !urlFinal.includes(`/${proximoCap}/`)) {
-                
-                console.log(`[FIM] Redirecionado para: ${urlFinal}.`);
-                break;
-            }
-
             const httpStatus = dados.solution.status;
-            console.log(`[RES] URL Final: ${urlFinal} | Status: ${httpStatus}`);
+
+            console.log(`[RES] Status: ${httpStatus} | URL: ${urlFinal}`);
+
+            // Validação de redirecionamento para Home (Capítulo não existe)
+            if (urlFinal.includes('sakuramangas.org') && !urlFinal.includes(`/${proximoCap}/`)) {
+                console.log(`[FIM] Redirecionado para a home. Capítulo ${proximoCap} não existe.`);
+                break; 
+            }
 
             if (httpStatus >= 200 && httpStatus < 300) {
                 capAtual = proximoCap;
+                break; // Sucesso!
             } else if (httpStatus === 404) {
-                break;
-            } else if (httpStatus === 403 || httpStatus === 503) {
-                console.error(`[BLOQUEIO] Cloudflare ou Render instável.`);
-                break;
+                break; // Não encontrado
+            } else if (httpStatus === 500) {
+                throw new Error("Erro 500 no site alvo (Tentar novamente)");
             } else {
-                console.error(`[ERRO HTTP] Status: ${httpStatus}`);
-                break;
+                throw new Error(`Status HTTP ${httpStatus}`);
             }
 
         } catch (error: any) {
-            console.error(`[FALHA DE CONEXÃO] Erro ao conectar no Render.`);
-            // Se der timeout aqui, é porque o Render demorou mais de 2 minutos para ligar
-            console.error(`Erro: ${error.message}`);
-            break;
+            console.error(`[ERRO] Tentativa ${i+1} falhou: ${error.message}`);
+            
+            if (i === 2) {
+                console.error('[FALHA FINAL] Não foi possível verificar este mangá agora.');
+                break;
+            }
+
+            console.log('[AGUARDANDO] 20 segundos para tentar novamente...');
+            await new Promise(res => setTimeout(res, 20000));
         }
     }
-    
     
     return capAtual;
 }
