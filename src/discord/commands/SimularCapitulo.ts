@@ -1,12 +1,13 @@
 import { createCommand } from "#base";
-import { ActionRowBuilder, ApplicationCommandType, ButtonBuilder, ButtonStyle, SendableChannels } from "discord.js";
-import { getMangas } from '../../utils/StateManager.js';
+import { ActionRowBuilder, ApplicationCommandType, ButtonBuilder, ButtonStyle, PermissionFlagsBits, SendableChannels } from "discord.js";
 import fs from 'fs'; // Importante para verificar a imagem local
+import { getMangas } from '../../utils/StateManager.js';
 
 createCommand({
     name: "simular-novo-capitulo",
     description: "Gera uma prévia visual da mensagem de notificação neste canal.",
     type: ApplicationCommandType.ChatInput,
+    defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
     options: [
         {
             name: "titulo",
@@ -41,7 +42,7 @@ createCommand({
 
         // --- 1. DADOS FAKE (SIMULAÇÃO) ---
         const capituloSimulado = manga.lastChapter + 1;
-        const tituloCapituloSimulado = "Título do Capítulo (Simulação)"; 
+        const tituloCapituloSimulado = "Título"; 
 
         // Gera URLs falsas baseadas no padrão
         let novaUrlSakura = "";

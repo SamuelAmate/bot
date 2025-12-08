@@ -1,5 +1,5 @@
 import { createCommand } from "#base";
-import { ApplicationCommandType } from "discord.js";
+import { ApplicationCommandType, PermissionFlagsBits } from "discord.js";
 // 💡 CORREÇÃO DO CAMINHO: Subir dois níveis (../../)
 import { monitorMangas } from '../../tasks/MonitorManga.js';
 
@@ -7,6 +7,7 @@ createCommand({
     name: "rodar-monitoramento",
     description: "Inicia a tarefa de monitoramento imediatamente.",
     type: ApplicationCommandType.ChatInput,
+    defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
     
     async run(interaction) {
         if (!interaction.isChatInputCommand() || !interaction.guild) return;

@@ -1,11 +1,12 @@
 import { createCommand } from "#base";
 import { createFileUpload, createLabel, createModalFields, createTextInput } from "@magicyan/discord";
-import { ApplicationCommandType, ChannelSelectMenuBuilder, ChannelType, TextInputStyle } from "discord.js";
+import { ApplicationCommandType, ChannelSelectMenuBuilder, ChannelType, PermissionFlagsBits, TextInputStyle, } from "discord.js";
 
 createCommand({
     name: "cadastro-obra-lancamento",
     description: "Preencha o formulario",
     type: ApplicationCommandType.ChatInput,
+    defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
     async run(interaction){
         await interaction.showModal({
             customId: "/obras/cadastro",

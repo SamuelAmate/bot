@@ -1,11 +1,12 @@
 import { createCommand } from "#base";
 import { createFileUpload, createLabel, createModalFields, createTextInput } from "@magicyan/discord";
-import { ApplicationCommandType, ChannelSelectMenuBuilder, ChannelType, TextInputStyle } from "discord.js";
+import { ApplicationCommandType, ChannelSelectMenuBuilder, ChannelType, TextInputStyle, PermissionFlagsBits } from "discord.js";
 
 createCommand({
     name: "enviar-post-semanal",
     description: "Preencha o formulario para enviar aviso",
     type: ApplicationCommandType.ChatInput,
+    defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
     async run(interaction){
         await interaction.showModal({
             customId: "enviar-post-semanal",

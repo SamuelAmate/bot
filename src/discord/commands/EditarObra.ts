@@ -1,12 +1,14 @@
 import { createCommand } from "#base";
 import { createFileUpload, createLabel, createModalFields, createTextInput } from "@magicyan/discord";
-import { ApplicationCommandOptionType, ApplicationCommandType, TextInputStyle } from "discord.js";
+import { ApplicationCommandOptionType, ApplicationCommandType, TextInputStyle, PermissionFlagsBits } from "discord.js";
+
 import { getMangas } from '../../utils/StateManager.js';
 
 createCommand({
     name: "editar-obra",
     description: "Editar url, imagem e a mensagem de uma obra cadastrada.",
     type: ApplicationCommandType.ChatInput,
+    defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
     options: [
         {
             name: "titulo_atual",

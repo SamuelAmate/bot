@@ -1,5 +1,5 @@
 import { createCommand } from "#base";
-import { ApplicationCommandType } from "discord.js";
+import { ApplicationCommandType, PermissionFlagsBits } from "discord.js";
 // 💡 CORREÇÃO DO CAMINHO: Subir dois níveis (../../)
 import { getMangas, removeManga } from '../../utils/StateManager.js';
 
@@ -7,6 +7,7 @@ createCommand({
     name: "remover-obra",
     description: "Remove uma obra da lista de monitoramento.",
     type: ApplicationCommandType.ChatInput,
+    defaultMemberPermissions: PermissionFlagsBits.ManageGuild,
     options: [
         {
             name: "titulo",
