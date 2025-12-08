@@ -6,42 +6,45 @@ import { loadState } from '../utils/StateManager.js';
 import { wakeUpRender } from '../utils/Scraper.js'; 
 
 export default createEvent({
-    name: "ready",
+    name: "ReadyHandler",
     event: "ready",
     once: true,
     
     async run() { 
-        // Força a tipagem para Client para ter acesso aos métodos do bot
+        console.log("!!! EVENTO READY DISPARADO !!!"); // Log de vida imediato
+
         const bot = this as unknown as Client; 
         
-        if (!bot || !bot.user) {
-            console.error("[Ready] ❌ Erro crítico: Cliente do bot não inicializado corretamente.");
-            return;
+        // 1. Carrega Estado
+        loadState();
+        console.log("[Ready] Banco de dados carregado.");
+
+        // 2. Acorda o Scraper (EM SEGUNDO PLANO - SEM AWAIT)
+        // Isso impede que uma falha de rede trave o bot de ligar
+        wakeUpRender().then(() => {
+            console.log("[Background] Verificação inicial do Flaresolverr concluída.");
+        }).catch(err => {
+            console.error("[Background] Erro ao acordar Flaresolverr:", err);
+        });
+
+        // 3. Verifica Mangás imediatamente (EM SEGUNDO PLANO)
+        monitorMangas(bot).catch(err => console.error("[Ready] Erro na verificação inicial:", err));
+
+        // 4. Inicia o Cron Job (CRUCIAL)
+        console.log(`[Ready] Configurando Cron Job para rodar a cada 10 minutos...`);
+        
+        // Validação: Verifica se o cron é válido
+        if (!cron.validate('*/10 * * * *')) {
+            console.error("[Ready] ERRO: Sintaxe do Cron inválida!");
         }
 
-        console.log(`[Ready] ✅ Bot online como ${bot.user.tag}`);
-
-        // 1. Carrega o banco de dados local (JSON)
-        loadState();
-
-        // 2. Acorda/Verifica o Scraper (Flaresolverr)
-        // Isso garante que a conexão está ok antes de tentar ler mangas
-        await wakeUpRender();
-
-        // 3. Executa a PRIMEIRA verificação imediatamente (sem esperar 10 min)
-        console.log('[Ready] 🚀 Rodando verificação inicial de mangás AGORA...');
-        await monitorMangas(bot);
-
-        // 4. Inicia o Cron Job (a cada 10 minutos)
-        // Expressão '*/10 * * * *' significa: minutos 0, 10, 20, 30, 40, 50
-        console.log('[Ready] ⏰ Agendador iniciado (Ciclos de 10 minutos).');
-        
-        cron.schedule('*/10 * * * *', async () => {
-            // Adicionei a hora atual no log para você saber exatamente quando rodou
-            const horaAtual = new Date().toLocaleTimeString('pt-BR');
-            console.log(`[Cron] 🔄 Iniciando ciclo de monitoramento às ${horaAtual}...`);
-            
-            await monitorMangas(bot); 
+        const tarefa = cron.schedule('*/10 * * * *', () => {
+            const agora = new Date().toISOString();
+            console.log(`[Cron] ⏰ Executando monitoramento automático: ${agora}`);
+            monitorMangas(bot); 
         });
+
+        tarefa.start(); // Força o inicio
+        console.log('[Ready] ✅ Sistema de Cronogramas ATIVO e rodando!');
     }
 });
