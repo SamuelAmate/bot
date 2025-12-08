@@ -1,0 +1,22 @@
+[
+  {
+    "titulo": "Gachiakuta",
+    "urlBase": "https://sakuramangas.org/obras/gachiakuta/157/",
+    "lastChapter": 157,
+    "channelId": "1446942992349790349",
+    "mensagemPadrao": "O **capítulo {capitulo}** de @{titulo}, **\"{nome_capitulo}\"** já está disponível.\n\n*aproveitem e boa leitura.*",
+    "imagem": "https://cdn.discordapp.com/attachments/1445485194596323423/1446958727751139348/gachiakuta_post.png?ex=6935e0d3&is=69348f53&hm=290092e09a88459aa0b72d66199c5b259ee5366d12c5114811f4e0af772f6c6f&",
+    "urlMangapark": "https://mangapark.io/title/327573-pt_br-gachiakuta",
+    "urlMangataro": "https://mangataro.org/manga/gachiakuta"
+  },
+  {
+    "titulo": "Witchriv",
+    "urlBase": "https://sakuramangas.org/obras/witchriv/",
+    "lastChapter": 6,
+    "channelId": "1446942992349790349",
+    "mensagemPadrao": "O **capítulo {capitulo}** de @{titulo}, **\"{nome_capitulo}\"** já está disponível.\n\n*aproveitem e boa leitura.*",
+    "imagem": "https://cdn.discordapp.com/attachments/1445485194596323423/1447296286339367063/WITCHRIV_POST.png?ex=69371b34&is=6935c9b4&hm=717a2c8aaf810951bd10cc3a5a5340150a744fc94b743b302ba85f98680ed1e3&",
+    "urlMangapark": "https://mangapark.io/title/431933-pt_br-witchriv",
+    "urlMangataro": "https://mangataro.org/manga/witchriv"
+  }
+]

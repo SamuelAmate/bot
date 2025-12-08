@@ -1,7 +1,7 @@
 import { createCommand } from "#base";
 import { ApplicationCommandType } from "discord.js";
 // 💡 CORREÇÃO DO CAMINHO: Subir dois níveis (../../)
-import { getMangas, removeManga } from '../../utils/StateManager.js'; 
+import { getMangas, removeManga } from '../../utils/StateManager.js';
 
 createCommand({
     name: "remover-obra",
@@ -33,12 +33,11 @@ createCommand({
         }
 
         // 2. Remove a obra usando a URL Base como chave
-        const sucesso = removeManga(mangaParaRemover.urlBase);
+        const sucesso = removeManga(mangaParaRemover.titulo);
 
         if (sucesso) {
             await interaction.reply({ 
                 content: `✅ Obra **"${mangaParaRemover.titulo}"** removida com sucesso!`,
-                ephemeral: true
             });
         } else {
             // Este caso é improvável se a obra foi encontrada antes.

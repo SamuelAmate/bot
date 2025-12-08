@@ -1,66 +1,95 @@
 import { createResponder, ResponderType } from "#base";
-import { addManga, getMangas, MangaEntry, removeManga } from '../../utils/StateManager.js';
+import { SendableChannels } from "discord.js";
+import { addManga, getMangas, MangaEntry } from '../../utils/StateManager.js';
 
 createResponder({
-    // Captura qualquer customId que comece com /obras/editar/
-    customId: "/obras/editar",
+    // ⚠️ ID FIXO IGUAL AO COMANDO
+    customId: "modal-editar-obra",
     types: [ResponderType.Modal], 
     cache: "cached",
-    async run(interaction) {
+    async run(interaction): Promise<void> { 
+        console.log("\n--- [RESPONDER] Iniciado ---");
+
         if (!interaction.isModalSubmit() || !interaction.guild) return;
 
-        const { fields } = interaction;
-        
-        // A chave da obra (urlBase) está no customId, após o último '/'
-        const urlBaseParaEditar = interaction.customId.split('/').pop();
-        
-        const novaUrlCompleta = fields.getTextInputValue("nova_url");
-        const novaMensagem = fields.getTextInputValue("nova_mensagem");
+        // Evita timeout
+        await interaction.deferUpdate().catch(console.error); 
 
-        // 1. Extrai a nova URL Base e Capítulo
-        const match = novaUrlCompleta.match(/(\d+)\/?$/); 
+        try {
+            const { fields } = interaction;
+            const channelAtual = interaction.channel as SendableChannels;
 
-        if (!match || !urlBaseParaEditar) {
-            await interaction.reply({ flags: ["Ephemeral"], content: "❌ Erro interno. Tente novamente ou contate o administrador." });
-            return;
+            // RECUPERA OS DADOS
+            const novaUrlCompleta = fields.getTextInputValue("nova_url");
+            const novaMensagem = fields.getTextInputValue("nova_mensagem");
+            
+            // Aqui está a mágica: Pegamos o título do campo de texto, não do ID
+            const tituloObraOriginal = fields.getTextInputValue("titulo_referencia");
+            console.log(`[RESPONDER] Editando obra: "${tituloObraOriginal}"`);
+
+            // Captura imagem
+            const imagens = fields.getUploadedFiles("imagem"); 
+            const imagemAnexada = imagens?.first(); 
+
+            // 1. Processa URL
+            const match = novaUrlCompleta.match(/(\d+)\/?$/); 
+            if (!match) {
+                await interaction.followUp({ flags: ["Ephemeral"], content: "❌ A URL precisa terminar com o número do capítulo." });
+                return;
+            }
+
+            const novoCap = parseInt(match[1]);
+            let novaUrlBase = novaUrlCompleta.substring(0, novaUrlCompleta.length - match[0].length);
+            novaUrlBase = novaUrlBase.replace(/\/+$/, "") + "/"; // Garante barra final
+
+            // 2. Busca Obra
+            const mangas = getMangas();
+            // Busca exata pois o título veio intacto do formulário
+            const mangaOriginal = mangas.find(m => m.titulo === tituloObraOriginal);
+
+            if (!mangaOriginal) {
+                await interaction.followUp({ flags: ["Ephemeral"], content: `❌ Erro crítico: Obra "${tituloObraOriginal}" não encontrada no banco.` });
+                return;
+            }
+
+            // 3. Backup Imagem
+            let urlImagemFinal = mangaOriginal.imagem || "";
+
+            if (imagemAnexada) {
+                console.log("[RESPONDER] Fazendo backup da imagem...");
+                try {
+                    const msgBackup = await channelAtual.send({
+                        content: `**Backup de imagem:** ${mangaOriginal.titulo} não apague essa mensagem`,
+                        files: [imagemAnexada.url] 
+                    });
+                    urlImagemFinal = msgBackup?.attachments.first()?.url || imagemAnexada.url;
+                } catch (e) {
+                    console.error("[RESPONDER] Erro backup:", e);
+                    urlImagemFinal = imagemAnexada.url;
+                }
+            }
+
+            // 4. Salva
+            const updatedManga: MangaEntry = {
+                ...mangaOriginal,
+                urlBase: novaUrlBase,
+                lastChapter: novoCap, 
+                mensagemPadrao: novaMensagem || undefined,
+                imagem: urlImagemFinal
+            };
+            
+            addManga(updatedManga);
+
+            await interaction.followUp({
+                content: `✅ **${mangaOriginal.titulo}** editada com sucesso!
+                                Monitorando a partir do capítulo: ${novoCap}
+                                Imagem: ${imagemAnexada ? "Atualizada" : "Mantida"}`
+            });
+            console.log("[RESPONDER] Sucesso!");
+
+        } catch (error) {
+            console.error("[RESPONDER] Erro Fatal:", error);
+            if (!interaction.replied) await interaction.followUp({ flags: ["Ephemeral"], content: "❌ Erro interno." });
         }
-
-        const novoCap = parseInt(match[1]);
-        const novaUrlBase = novaUrlCompleta.substring(0, novaUrlCompleta.length - match[1].length); 
-        
-        // 2. Busca o objeto original no estado
-        const mangas = getMangas();
-        const mangaOriginal = mangas.find(m => m.urlBase === urlBaseParaEditar);
-
-        if (!mangaOriginal) {
-            await interaction.reply({ flags: ["Ephemeral"], content: "❌ A obra que você está tentando editar não foi encontrada no banco de dados." });
-            return;
-        }
-        
-        // 3. Verifica se a nova URL é válida (opcional, mas recomendado)
-        // Você pode chamar o getLatestChapter aqui para verificar se a nova URL base funciona,
-        // mas vamos apenas confiar que o usuário digitou corretamente para simplificar.
-
-        // 4. Cria e salva o objeto atualizado
-        const updatedManga: MangaEntry = {
-            ...mangaOriginal,
-            urlBase: novaUrlBase, // Pode ter mudado
-            lastChapter: novoCap, // Novo capítulo de partida
-            mensagemPadrao: novaMensagem,
-        };
-        
-        // Se a urlBase mudou, removemos a antiga e adicionamos a nova.
-        if (urlBaseParaEditar !== novaUrlBase) {
-            removeManga(urlBaseParaEditar);
-        }
-        
-        addManga(updatedManga); // addManga já cuida de atualizar se a chave for a mesma
-
-        await interaction.reply({
-            flags: ["Ephemeral"],
-            content: `✅ Obra **${mangaOriginal.titulo}** editada com sucesso!
-Novo Capítulo de partida: **${novoCap}**
-Nova URL Base: \`${novaUrlBase}\``
-        });
     }
 });

@@ -1,38 +1,42 @@
 // Em src/events/ReadyEvent.ts
 import { createEvent } from '#base';
+import { Client } from 'discord.js';
 import cron from 'node-cron';
 import { monitorMangas } from '../tasks/MonitorManga.js';
 import { loadState } from '../utils/StateManager.js';
-import { wakeUpRender } from '../utils/Scraper.js'; // <--- Importe a nova função
+import { wakeUpRender } from '../utils/Scraper.js'; 
 
 export default createEvent({
     name: "ready",
     event: "ready",
     once: true,
     
-    async run(..._args: any[]) { 
-        const bot = this as any; 
+    async run() { 
+        const bot = this as unknown as Client; 
         
         if (!bot || !bot.user) {
-            console.error("Erro no bot.");
+            console.error("[Ready] Erro crítico: Cliente do bot não inicializado corretamente.");
             return;
         }
 
-        console.log(`Bot online como ${bot.user.tag}`);
+        console.log(` [Ready] Bot online como ${bot.user.tag}`);
+
         loadState();
 
-        // --- MUDANÇA AQUI ---
-        // 1. Tenta acordar o Render antes de começar a monitorar
+        // 2. Acorda/Verifica o Scraper (Flaresolverr)
         await wakeUpRender();
 
-        // 2. Agora sim roda a verificação
-        console.log('[INIT] Rodando primeira verificação...');
+        // 3. Executa a primeira verificação imediatamente
+        console.log('[Ready] Rodando verificação inicial de mangás...');
         monitorMangas(bot);
 
-        // 3. Cron Job
+        // 4. Inicia o Cron Job (a cada 10 minutos)
+        // Dica: '*/10' roda no minuto 0, 10, 20...
         cron.schedule('*/10 * * * *', () => {
-            console.log('[CRON] Iniciando monitoramento de mangás...');
+            console.log(' [Cron] Iniciando ciclo de monitoramento...');
             monitorMangas(bot); 
         });
+
+        console.log('[Ready] Sistema de cronogramas iniciado.');
     }
 });

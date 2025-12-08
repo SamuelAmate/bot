@@ -1,74 +1,88 @@
-// src/discord/responders/CadastroObraResponder.ts
-
 import { createResponder, ResponderType } from "#base";
-// 💡 CORREÇÃO DO CAMINHO: Subir dois níveis (../..), pois você está em src/discord/responders
-import { addManga, getMangas, MangaEntry } from '../../utils/StateManager.js';
+import { SendableChannels } from "discord.js";
+import { addManga, MangaEntry } from '../../utils/StateManager.js';
 
 createResponder({
     customId: "/obras/cadastro",
     types: [ResponderType.Modal], 
     cache: "cached",
     async run(interaction) {
-        // Garantimos que é uma submissão de modal e que é em um canal de guilda
-        if (!interaction.isModalSubmit() || !interaction.guild) {
-            return;
-        }
-
-        const { fields } = interaction;
-        // 💡 CORREÇÃO DE CANAL: O canal é acessível via interaction.channel
-        const channel = interaction.channel;
+        if (!interaction.isModalSubmit() || !interaction.guild) return;
         
-        // Verifica se o canal é text-based (necessário para o fetch no MonitorManga)
-        if (!channel || !channel.isTextBased()) {
-            await interaction.reply({ flags: ["Ephemeral"], content: "❌ O bot não pode monitorar obras neste tipo de canal." });
-            return;
-        }
+        const { fields } = interaction;
+        const channelAtual = interaction.channel as SendableChannels;
 
         const titulo = fields.getTextInputValue("titulo");
-        const urlCompleta = fields.getTextInputValue("url"); 
-        const mensagemPadrao = fields.getTextInputValue("mensagem") || `Novo capítulo de ${titulo} disponível!`;
+        
+        // --- LÓGICA DE SEPARAÇÃO DOS LINKS ---
+        const textoLinks = fields.getTextInputValue("todos_links");
+        
+        // Quebra o texto onde tiver espaço, virgula ou quebra de linha
+        const listaUrls = textoLinks.split(/[\s,\n]+/).filter(url => url.startsWith("http"));
 
-        const match = urlCompleta.match(/(\d+)\/?$/); 
+        // Procura quem é quem baseado no nome do site
+        const urlSakura = listaUrls.find(u => u.includes("sakura") || u.includes("lermanga") || u.includes("golden"));
+        const urlMangapark = listaUrls.find(u => u.includes("mangapark"));
+        const urlMangataro = listaUrls.find(u => u.includes("mangataro"));
 
-            if (!match) {
-                // ... (lógica de erro)
-                return;
-                        }
-
-            const ultimoCap = parseInt(match[1]); // Captura o 64
-            const parteParaRemover = match[0]; 
-
-            let urlBase = urlCompleta.substring(0, urlCompleta.length - parteParaRemover.length); 
-
-            if (!urlBase.endsWith('/')) {
-            urlBase += '/';
-            }
-
-        if (!match) {
-            await interaction.reply({ flags: ["Ephemeral"], content: "❌ URL inválida. Certifique-se de usar o link de um capítulo, terminando com o número (ex: .../obra/7/)." });
+        // Validação básica: O Sakura é obrigatório para o monitor funcionar
+        if (!urlSakura) {
+            await interaction.reply({ flags: ["Ephemeral"], content: "❌ **Erro:** Você precisa fornecer pelo menos o link do **Sakura** no campo de links." });
             return;
         }
-        
-        // 2. Validação e Adição ao Estado
-        const mangas = getMangas();
-        if (mangas.some(m => m.urlBase === urlBase)) {
-            await interaction.reply({ flags: ["Ephemeral"], content: `⚠️ A obra **${titulo}** já está sendo monitorada!` });
+
+        // Pega o capítulo do link do Sakura
+        const match = urlSakura.match(/(\d+)\/?$/); 
+        if (!match) {
+            await interaction.reply({ flags: ["Ephemeral"], content: "❌ Não foi possível detectar o número do capítulo no link do Sakura." });
             return;
+        }
+        const ultimoCap = parseInt(match[1]);
+        // Remove o número do final para criar a urlBase
+        const urlBase = urlSakura.substring(0, urlSakura.length - match[0].length) + '/';
+
+        // -------------------------------------
+
+        const mensagemPadrao = fields.getTextInputValue("mensagem");
+        const imagens = fields.getUploadedFiles("imagem"); 
+        const imagemAnexada = imagens?.first(); 
+
+        const canaisSelecionados = fields.getSelectedChannels("canal");
+        const canalDestino = canaisSelecionados ? canaisSelecionados.first() as SendableChannels : null;
+        const monitorar = true;
+
+        if (!canalDestino) {
+            await interaction.reply({ flags: ["Ephemeral"], content: "❌ Canal inválido." });
+            return;
+        }
+
+        // Backup da Imagem
+        let urlImagemFinal = "";
+        if (imagemAnexada) {
+            try {
+                const msgBackup = await channelAtual.send({
+                    content: `**Backup de Imagem:** ${titulo} não apague essa mensagem`,
+                    files: [imagemAnexada.url] 
+                });
+                urlImagemFinal = msgBackup?.attachments.first()?.url || "";
+            } catch (e) { console.error(e); }
         }
 
         const newEntry: MangaEntry = {
+            titulo: titulo,
             urlBase: urlBase,
             lastChapter: ultimoCap, 
-            channelId: channel.id, // Usa o ID do canal onde a interação ocorreu
-            titulo: titulo,
+            channelId: canalDestino.id,
             mensagemPadrao: mensagemPadrao,
+            imagem: urlImagemFinal,
+            urlMangapark: urlMangapark, 
+            urlMangataro: urlMangataro,
         };
+
         addManga(newEntry);
         
-        // Resposta de sucesso
         await interaction.reply({
-            flags: ["Ephemeral"],
-            content: `✅ Obra **${titulo}** cadastrada! Monitoramento iniciado a partir do Cap. **${ultimoCap}**. (${getMangas().length} obras no total).`
+            content: `✅ **${titulo}** cadastrado!\n🌸 **Monitorando:** a partir do capítulo ${ultimoCap}\n🎢 **MangaPark:** ${urlMangapark ? 'Sim' : 'Não'}\n🎴 **MangaTaro:** ${urlMangataro ? 'Sim' : 'Não'}\n Para testar a mensagem utilize o comando /simular-novo-capitulo`
         });
     }
 });

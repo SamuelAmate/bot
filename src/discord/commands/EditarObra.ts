@@ -1,21 +1,22 @@
 import { createCommand } from "#base";
-import { createLabel, createModalFields, createTextInput } from "@magicyan/discord";
-import { ApplicationCommandType } from "discord.js";
+import { createFileUpload, createLabel, createModalFields, createTextInput } from "@magicyan/discord";
+import { ApplicationCommandOptionType, ApplicationCommandType, TextInputStyle } from "discord.js";
 import { getMangas } from '../../utils/StateManager.js';
 
 createCommand({
     name: "editar-obra",
-    description: "Edita a URL e a mensagem de uma obra cadastrada.",
+    description: "Editar url, imagem e a mensagem de uma obra cadastrada.",
     type: ApplicationCommandType.ChatInput,
     options: [
         {
             name: "titulo_atual",
             description: "O título da obra que você deseja editar.",
-            type: 3, 
+            type: ApplicationCommandOptionType.String, 
             required: true
         }
     ],
     async run(interaction){
+        console.log("--- [CMD: editar-obra] Iniciado ---");
         if (!interaction.isChatInputCommand()) return;
 
         const tituloAtual = interaction.options.getString("titulo_atual", true);
@@ -25,40 +26,66 @@ createCommand({
 
         if (!manga) {
             await interaction.reply({ 
-                content: `❌ Obra com o título **"${tituloAtual}"** não encontrada.`,
+                content: `❌ Obra **"${tituloAtual}"** não encontrada.`,
                 ephemeral: true
             });
             return;
         }
 
-        // URL do último capítulo completo (para pré-preencher o campo)
-        const urlCompletaAtual = `${manga.urlBase}${manga.lastChapter}/`;
+        console.log(`[CMD] Obra encontrada: ${manga.titulo}`);
 
-        await interaction.showModal({
-            // Passamos o título da obra na customId para sabermos qual editar
-            customId: `/obras/editar/${manga.urlBase}`, 
-            title: `Editar Obra: ${manga.titulo}`,
-            components: createModalFields(
-                createLabel(
-                    "Url",
-                    "Novo link do ÚLTIMO CAPÍTULO (Ex: https://.../obra/8/)",
-                    createTextInput({ 
-                        customId: "nova_url", 
-                        required: true,
-                        value: urlCompletaAtual // Preenche com o valor atual
-                    })
-                ),
-                createLabel(
-                    "Mensagem",
-                    "Nova mensagem padrão para notificação (opcional)",
-                    createTextInput({ 
-                        customId: "nova_mensagem", 
-                        required: false, 
-                        style: 2, // TextInputStyle.Paragraph
-                        value: manga.mensagemPadrao 
-                    })
-                ),
-            )
-        })
+        // Limpeza da URL
+        let baseLimpa = manga.urlBase.replace(/\/+$/, ""); 
+        baseLimpa = baseLimpa.replace(/\/\d+$/, "");
+        const urlCompletaAtual = `${baseLimpa}/${manga.lastChapter}/`.replace(/\/\/+/g, '/').replace('http:/', 'http://').replace('https:/', 'https://');
+        
+        try {
+            await interaction.showModal({
+                customId: "modal-editar-obra", 
+                title: `Editar: ${manga.titulo.substring(0, 30)}`,
+                components: createModalFields(
+                    createLabel(
+                        "Url",
+                        "Novo link do último capítulo no Sakura",
+                        createTextInput({ 
+                            customId: "nova_url", 
+                            required: true,
+                            value: urlCompletaAtual 
+                        })
+                    ),
+                    createLabel(
+                        "Mensagem",
+                        "Nova mensagem padrão (opcional)",
+                        createTextInput({ 
+                            customId: "nova_mensagem", 
+                            required: false, 
+                            style: TextInputStyle.Paragraph,
+                            value: manga.mensagemPadrao || "" 
+                        })
+                    ),
+                    createLabel(
+                        "Imagem",
+                        "Nova imagem da capa (opcional)",
+                        createFileUpload({
+                            customId: "imagem", 
+                            required: false,
+                            maxValues: 1
+                        })
+                    ),
+                    createLabel(
+                        "Obra (Não alterar)", 
+                        "Identificador da obra para envio dos dados",
+                        createTextInput({
+                            customId: "titulo_referencia",
+                            required: true,
+                            value: manga.titulo
+                        })
+                    )
+                )
+            });
+            console.log("[CMD] Modal aberto com sucesso!");
+        } catch (error) {
+            console.error("[CMD] ERRO:", error);
+        }
     }
 });

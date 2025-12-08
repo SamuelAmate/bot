@@ -1,88 +1,120 @@
 import { createCommand } from "#base";
-import { ApplicationCommandType, TextChannel } from "discord.js";
-// 💡 CORREÇÃO DO CAMINHO: Subir dois níveis (../../) da pasta commands
+import { ApplicationCommandType, TextChannel, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import { getMangas } from '../../utils/StateManager.js';
 
 createCommand({
     name: "simular-novo-capitulo",
-    description: "Simula o lançamento de um novo capítulo para testes de notificação.",
+    description: "Gera uma prévia visual da mensagem de notificação.",
     type: ApplicationCommandType.ChatInput,
     options: [
         {
             name: "titulo",
-            description: "O título da obra cadastrada que você deseja simular.",
+            description: "O título da obra cadastrada.",
             type: 3, // STRING
             required: true
         }
     ],
     async run(interaction) {
-        // Garantir que a interação é um comando e em um canal de texto
         if (!interaction.isChatInputCommand() || !interaction.guild) return;
-        
+
+        // Apenas confirma para quem digitou que o processo iniciou (invisível para os outros)
+        await interaction.deferReply({ ephemeral: true });
+
         const tituloParaSimular = interaction.options.getString("titulo", true);
         const mangas = getMangas();
-
-        // 1. Encontra a obra no estado
         const manga = mangas.find(m => m.titulo?.toLowerCase() === tituloParaSimular.toLowerCase());
 
         if (!manga) {
-            await interaction.reply({ 
-                content: `❌ Obra com o título "${tituloParaSimular}" não encontrada na lista.`,
-                ephemeral: true
-            });
+            await interaction.editReply(`❌ Obra "${tituloParaSimular}" não encontrada no banco de dados.`);
             return;
         }
 
-        const canal = interaction.channel;
-
-        if (!canal || !canal.isTextBased()) {
-            await interaction.reply({ 
-                content: `❌ Este comando só pode ser usado em canais de texto.`,
-                ephemeral: true
-            });
+        const channel = await interaction.client.channels.fetch(manga.channelId).catch(() => null);
+        if (!channel || !channel.isTextBased()) {
+            await interaction.editReply(`❌ Canal de notificação configurado não é válido.`);
             return;
         }
 
-        // 2. Simula o próximo capítulo
+        // --- 1. DADOS FAKE (SIMULAÇÃO) ---
         const capituloSimulado = manga.lastChapter + 1;
-        const urlSimulada = `${manga.urlBase}${capituloSimulado}/`;
+        const tituloCapituloSimulado = "Título de Exemplo"; // Texto fixo para você ver como fica
+
+        // Gera URLs falsas baseadas no padrão (sem verificar se existem)
+        let novaUrlSakura = "";
+        const match = manga.urlBase.match(/(\d+)\/?$/);
+        if (match) {
+            novaUrlSakura = manga.urlBase.replace(match[1], capituloSimulado.toString());
+        } else {
+            novaUrlSakura = `${manga.urlBase}${capituloSimulado}/`;
+        }
+
+        // --- 2. MONTAGEM DOS BOTÕES ---
+        const row = new ActionRowBuilder<ButtonBuilder>()
+            .addComponents(
+                new ButtonBuilder()
+                    .setLabel('Ler no Sakura')
+                    .setEmoji('🌸') 
+                    .setStyle(ButtonStyle.Link) 
+                    .setURL(novaUrlSakura), 
+                new ButtonBuilder()
+                    .setLabel('Mangapark')
+                    .setEmoji('🎢')
+                    .setStyle(ButtonStyle.Link)
+                    .setURL(manga.urlMangapark || "https://mangapark.net"),
+                new ButtonBuilder()
+                    .setLabel('MangaTaro')
+                    .setEmoji('🎴')
+                    .setStyle(ButtonStyle.Link)
+                    .setURL(manga.urlMangataro || "https://mangataro.org/home")
+            );
+
+        // --- 3. MONTAGEM DO TEXTO (Lógica Idêntica ao Monitor) ---
+        let mensagemFinal = manga.mensagemPadrao || "O **capítulo {capitulo}** de @{titulo}, **\"{nome_capitulo}\"** já está disponível.\n\n*aproveitem e boa leitura.*";
+
+        // Aplica o título fake
+        mensagemFinal = mensagemFinal.replace(/{nome_capitulo}/g, tituloCapituloSimulado);
+
+        // Substituições Padrão
+        mensagemFinal = mensagemFinal
+            .replace(/{capitulo}/g, capituloSimulado.toString())
+            .replace(/{titulo}/g, manga.titulo)
+            .replace(/{link_sakura}/g, '') 
+            .replace(/{link_mangapark}/g, '')
+            .replace(/{link_mangataro}/g, '');
         
-        // 3. Envia a notificação de teste (Lógica idêntica ao MonitorManga.ts)
+        // Limpeza
+        mensagemFinal = mensagemFinal.replace(/[ \t]{2,}/g, " ").replace(/ ,/g, ",");
+
+        // --- 4. MENÇÃO DE CARGO ---
+        const role = interaction.guild.roles.cache.find(r => r.name.toLowerCase() === manga.titulo.toLowerCase());
+        if (role) {
+            mensagemFinal = mensagemFinal.replace(`@${manga.titulo}`, role.toString());
+        } else {
+            // Se não tiver cargo criado, deixa em negrito pra não ficar feio na simulação
+            mensagemFinal = mensagemFinal.replace(`@${manga.titulo}`, `**${manga.titulo}**`);
+        }
+
+        // --- 5. ENVIO ---
         try {
-            const channel = await interaction.client.channels.fetch(manga.channelId);
+            const textChannel = channel as TextChannel;
+            
+            const payload: any = { 
+                content: mensagemFinal.trim(),
+                components: [row] 
+            };
 
-            // 💡 CORREÇÃO: Verificamos se é text-based E que não é nulo/indefinido
-            if (channel && channel.isTextBased()) {
-                
-                // Faz o cast para TextBasedChannel para que o TypeScript encontre o método send()
-                const textChannel = channel as TextChannel; 
-                
-                await textChannel.send(`[SIMULAÇÃO - SEM ATUALIZAÇÃO NO ESTADO] 
-🚨 **NOVO CAPÍTULO DISPONÍVEL!** ${manga.titulo}
-Capítulo **${capituloSimulado}**! 🔥
-${urlSimulada}`);
-                
-                // Resposta no canal do comando (Ephemeral)
-                await interaction.reply({ 
-                    content: `✅ Simulação de notificação enviada com sucesso para o canal <#${manga.channelId}>! (Capítulo ${capituloSimulado}).`,
-                    ephemeral: true
-                });
-
-            } else {
-                await interaction.reply({ 
-                    content: `⚠️ Canal de notificação <#${manga.channelId}> não encontrado ou não é um canal de texto.`,
-                    ephemeral: true
-                });
+            // Se tiver imagem salva no JSON, anexa ela
+            if (manga.imagem) {
+                payload.files = [manga.imagem];
             }
 
+            await textChannel.send(payload);
+
+            await interaction.editReply(`✅ **Visualização enviada!** Verifique o canal ${textChannel}.`);
+
         } catch (error) {
-            console.error(`Erro durante a simulação para ${manga.titulo}:`, error);
-            await interaction.reply({ 
-                content: `❌ Ocorreu um erro ao tentar enviar a simulação. Verifique os logs.`,
-                ephemeral: true
-            });
+            console.error(error);
+            await interaction.editReply(`❌ Erro ao enviar mensagem: ${(error as Error).message}`);
         }
-        
-        // 4. IMPORTANTE: Não chame addManga(updatedManga) para não alterar a contagem real.
     }
 });

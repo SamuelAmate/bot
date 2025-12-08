@@ -1,58 +1,110 @@
-import * as fs from 'fs';
-import * as path from 'path';
+import fs from 'fs';
+import path from 'path';
 
-// Define a estrutura do objeto que será salvo para cada mangá
+const filePath = path.join(process.cwd(), 'database', 'mangas.json');
+
 export interface MangaEntry {
-    urlBase: string;       // Ex: https://sakuramangas.org/obras/witchriv/
-    lastChapter: number;   // Último capítulo encontrado (ex: 7)
-    channelId: string;     // Canal para notificar
-    titulo: string;        // Título da obra
-    mensagemPadrao: string; // Mensagem para notificação
+    titulo: string;
+    urlBase: string;
+    lastChapter: number;
+    channelId: string;
+    mensagemPadrao?: string;
+    imagem?: string;
+    urlMangapark?: string;
+    urlMangataro?: string;
 }
 
-const STATE_FILE = path.resolve(process.cwd(), 'estado.json');
-// Usa um Map para facilitar a busca e evitar duplicidade de URL Base
-let state = new Map<string, MangaEntry>(); 
+function ensureDirectory() {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+}
 
-// Carrega o estado do arquivo
+export function getMangas(): MangaEntry[] {
+    ensureDirectory();
+    if (!fs.existsSync(filePath)) return [];
+    
+    try {
+        const data = fs.readFileSync(filePath, 'utf-8');
+        return JSON.parse(data);
+    } catch (e) {
+        console.error("❌ Erro ao ler banco de dados:", e);
+        return [];
+    }
+}
+
 export function loadState(): void {
-    if (fs.existsSync(STATE_FILE)) {
+    ensureDirectory(); // Garante que a pasta 'database' existe
+    
+    if (!fs.existsSync(filePath)) {
+        // Se o arquivo não existe, cria um array vazio
+        fs.writeFileSync(filePath, JSON.stringify([], null, 2));
+        console.log("[State] Banco de dados criado com sucesso (vazio).");
+    } else {
+        // Se já existe, só avisa que encontrou
         try {
-            const data = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
-            // Converte o objeto JSON de volta para Map
-            state = new Map(Object.entries(data)); 
-            console.log('Estado carregado com sucesso.');
-        } catch (error) {
-            console.error('Erro ao carregar o estado:', error);
+            const data = fs.readFileSync(filePath, 'utf-8');
+            const json = JSON.parse(data);
+            console.log(`[State] Banco de dados carregado. Total de obras: ${json.length}`);
+        } catch (e) {
+            console.error("[State] O arquivo existe mas está corrompido. Tente corrigir manualmente.");
         }
     }
 }
 
-export function removeManga(urlBase: string): boolean {
-    const wasDeleted = state.delete(urlBase);
-    if (wasDeleted) {
-        saveState();
-    }
-    return wasDeleted;
-}
+export function addManga(newManga: MangaEntry): void {
+    const mangas = getMangas();
+    
+    // Procura pelo TÍTULO (que é único e fixo), ignorando maiúsculas/minúsculas
+    const index = mangas.findIndex(m => m.titulo.toLowerCase() === newManga.titulo.toLowerCase());
 
-// Salva o estado no arquivo
-export function saveState(): void {
+    if (index !== -1) {
+        // Atualiza a entrada existente
+        mangas[index] = newManga;
+        console.log(`[State] Atualizando obra existente: ${newManga.titulo}`);
+    } else {
+        // Adiciona nova
+        mangas.push(newManga);
+        console.log(`[State] Cadastrando nova obra: ${newManga.titulo}`);
+    }
+
+    // Salva no arquivo
     try {
-        // Converte o Map para um objeto para salvar no JSON
-        const dataToSave = Object.fromEntries(state);
-        fs.writeFileSync(STATE_FILE, JSON.stringify(dataToSave, null, 2), 'utf-8');
+        fs.writeFileSync(filePath, JSON.stringify(mangas, null, 2));
     } catch (error) {
-        console.error('Erro ao salvar o estado:', error);
+        console.error("❌ [State] ERRO CRÍTICO AO SALVAR JSON:", error);
     }
 }
 
-export function addManga(entry: MangaEntry): void {
-    // A chave do Map será a urlBase para garantir que não há duplicidade
-    state.set(entry.urlBase, entry);
-    saveState();
+export function removeManga(tituloParaRemover: string): boolean {
+    const mangas = getMangas();
+    const quantidadeInicial = mangas.length;
+
+    // Filtra removendo apenas se o TÍTULO bater
+    const novaLista = mangas.filter(m => m.titulo.toLowerCase() !== tituloParaRemover.toLowerCase());
+
+    if (novaLista.length < quantidadeInicial) {
+        fs.writeFileSync(filePath, JSON.stringify(novaLista, null, 2));
+        console.log(`🗑️ [State] Obra removida: ${tituloParaRemover}`);
+        return true; // Sucesso!
+    }
+
+    return false; // Não achou nada
 }
 
-export function getMangas(): MangaEntry[] {
-    return Array.from(state.values());
+export function limparDuplicatas(): void {
+    const mangas = getMangas();
+    const unicos = new Map();
+
+    // Mantém apenas a versão mais recente de cada título
+    mangas.forEach(m => {
+        const existente = unicos.get(m.titulo.toLowerCase());
+        if (!existente || m.lastChapter > existente.lastChapter) {
+            unicos.set(m.titulo.toLowerCase(), m);
+        }
+    });
+
+    const listaLimpa = Array.from(unicos.values());
+    fs.writeFileSync(filePath, JSON.stringify(listaLimpa, null, 2));
 }
