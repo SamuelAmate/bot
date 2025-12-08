@@ -1,14 +1,16 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 
-const FLARESOLVERR_URL = process.env.FLARESOLVERR_URL || 'http://152.67.33.245:8191/v1';
+// Pega a URL do ambiente ou usa o padrão. 
+// O replace remove a barra no final se houver, e adiciona /v1
+const BASE_URL = process.env.FLARESOLVERR_URL || 'http://localhost:8191';
+const FLARESOLVERR_API = `${BASE_URL.replace(/\/$/, '')}/v1`;
 
-// --- NOVA FUNÇÃO: WAKE UP (Adicione isto ao seu arquivo) ---
+// --- NOVA FUNÇÃO: WAKE UP ---
 export async function wakeUpRender(): Promise<void> {
-    console.log(" [System] Verificando conexão com Flaresolverr...");
+    console.log(" [System] Verificando conexão com FlareSolverr em: " + FLARESOLVERR_API);
     try {
-        // Envia um comando leve apenas para ver se o serviço responde
-        const res = await axios.post(FLARESOLVERR_URL, { 
+        const res = await axios.post(FLARESOLVERR_API, { 
             cmd: 'sessions.list',
             maxTimeout: 10000 
         });
@@ -20,16 +22,14 @@ export async function wakeUpRender(): Promise<void> {
         }
     } catch (error) {
         console.error("[System] Falha ao conectar no Flaresolverr. O scraper pode falhar.");
-        // Não jogamos throw erro aqui para não derrubar o bot inteiro, apenas logamos.
     }
 }
 
 // --- FUNÇÃO 1: O VIGIA (Sakura) ---
-// (Essa parte verifica se o número do capítulo mudou no título da página)
 export async function verificarSeSaiuNoSakura(urlBaseSakura: string, ultimoCapitulo: number): Promise<{ saiu: boolean, numero: number, novaUrl: string }> {
     const proximoNumero = ultimoCapitulo + 1;
     
-    // Tenta adivinhar a URL do próximo capítulo no Sakura
+    // Tenta adivinhar a URL do próximo capítulo
     let urlParaTestar = "";
     const match = urlBaseSakura.match(/(\d+)\/?$/);
     if (match) {
@@ -49,14 +49,13 @@ export async function verificarSeSaiuNoSakura(urlBaseSakura: string, ultimoCapit
         const $ = cheerio.load(html);
         const title = $('title').text().trim();
 
-        // Regex para ver se "Capítulo X" está no título
         const regex = new RegExp(`Cap(\\.|ítulo)?\\s*${proximoNumero}`, 'i');
         
         if (regex.test(title)) {
             return { saiu: true, numero: proximoNumero, novaUrl: urlParaTestar };
         }
     } catch (e) {
-        // Erro silencioso para não poluir o log
+        // Erro silencioso
     } finally {
         destroySession(sessionID);
     }
@@ -65,7 +64,6 @@ export async function verificarSeSaiuNoSakura(urlBaseSakura: string, ultimoCapit
 }
 
 // --- FUNÇÃO 2: O BUSCADOR (MangaPark / Genérico) ---
-// (Essa parte entra na lista de capítulos e caça o link certo)
 export async function buscarLinkNaObra(urlPaginaObra: string, capituloAlvo: number): Promise<{ link: string, titulo: string | null }> {
     const sessionID = `busca_mp_${Date.now()}`;
 
@@ -79,20 +77,18 @@ export async function buscarLinkNaObra(urlPaginaObra: string, capituloAlvo: numb
         let linkEncontrado = "";
         let tituloEncontrado: string | null = null;
 
-        // Percorre TODOS os links da página
         $('a').each((_, el) => {
-            if (linkEncontrado) return false; // Se já achou, para.
+            if (linkEncontrado) return false;
 
             const textoLink = $(el).text().trim().toLowerCase();
             const href = $(el).attr('href');
 
             if (!href) return;
 
-            // Regex para validar se é o capítulo certo (Ex: "157", "Chapter 157")
             const regexCapitulo = new RegExp(`(?:^|\\s|ch\\.?|chapter)\\s*${capituloAlvo}(?:\\s|:|$)`, 'i');
 
             if (regexCapitulo.test(textoLink)) {
-                // --- 1. MONTAGEM DO LINK ---
+                // 1. Montagem do Link
                 if (href.startsWith('http')) {
                     linkEncontrado = href;
                 } else {
@@ -100,40 +96,32 @@ export async function buscarLinkNaObra(urlPaginaObra: string, capituloAlvo: numb
                     linkEncontrado = urlBase + href;
                 }
 
-                // --- 2. CAÇA AO TÍTULO (Estratégia Baseada nas Imagens) ---
-                
-                // TENTATIVA A: Procurar SPAN dentro do Link (Baseado na Imagem 1)
-                // Onde o título geralmente fica num span com opacidade
+                // 2. Caça ao Título
                 let rawText = $(el).find('span.opacity-50').text().trim();
                 
-                // Se não achou na classe específica, pega qualquer texto dentro do link que NÃO seja o numero
                 if (!rawText) {
                     rawText = $(el).text().replace(regexCapitulo, '').trim();
                 }
 
-                // TENTATIVA B: Procurar SPAN vizinho (Baseado na Imagem 2)
-                // Às vezes o título está num <span> logo após o <a>
                 if (!rawText || rawText.length < 3) {
-                    const vizinho = $(el).next('span'); // Pega o próximo elemento se for span
+                    const vizinho = $(el).next('span');
                     if (vizinho.length > 0) {
                         rawText = vizinho.text().trim();
                     }
                 }
                 
-                // --- 3. LIMPEZA FINAL ---
-                // Remove caracteres chatos do começo (: - " )
+                // 3. Limpeza
                 const tituloLimpo = rawText
-                    .replace(/^[:\s\-"\.]+/, '') // Remove do início
-                    .replace(/["-]+$/, '')      // Remove do fim
+                    .replace(/^[:\s\-"\.]+/, '')
+                    .replace(/["-]+$/, '')
                     .trim();
 
-                // Validação final: só aceita se tiver pelo menos 2 letras (pra evitar "v1", "pt-br", etc)
                 if (tituloLimpo.length > 2) {
                     tituloEncontrado = tituloLimpo;
                 }
 
                 console.log(`[Debug] Título Bruto: "${rawText}" | Final: "${tituloEncontrado}"`);
-                return false; // Sai do loop
+                return false; 
             }
         });
 
@@ -156,13 +144,15 @@ export async function buscarLinkNaObra(urlPaginaObra: string, capituloAlvo: numb
 // Helpers (FlareSolverr)
 async function requestFlaresolverr(url: string, session: string) {
     try {
-        const res = await axios.post(FLARESOLVERR_URL, {
-            cmd: 'request.get', url, maxTimeout: 20000, session
+        // Agora usa a constante corrigida FLARESOLVERR_API
+        const res = await axios.post(FLARESOLVERR_API, {
+            cmd: 'request.get', url, maxTimeout: 60000, session // Aumentei timeout para 60s
         });
         if (res.data.status === 'ok') return res.data.solution.response;
     } catch (e) { return null; }
     return null;
 }
+
 async function destroySession(session: string) {
-    axios.post(FLARESOLVERR_URL, { cmd: 'sessions.destroy', session }).catch(() => {});
+    axios.post(FLARESOLVERR_API, { cmd: 'sessions.destroy', session }).catch(() => {});
 }

@@ -49,7 +49,6 @@ createResponder({
 
         const canaisSelecionados = fields.getSelectedChannels("canal");
         const canalDestino = canaisSelecionados ? canaisSelecionados.first() as SendableChannels : null;
-        const monitorar = true;
 
         if (!canalDestino) {
             await interaction.reply({ flags: ["Ephemeral"], content: "❌ Canal inválido." });
