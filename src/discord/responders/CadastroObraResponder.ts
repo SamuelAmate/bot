@@ -1,87 +1,153 @@
-import { createResponder, ResponderType } from "#base";
-import { SendableChannels } from "discord.js";
-import { addManga, MangaEntry } from '../../utils/StateManager.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
+import { buscarLinkNaObra, verificarSeSaiuNoSakura } from '../../utils/Scraper.js';
+import { addManga, getMangas, limparDuplicatas, MangaEntry } from '../../utils/StateManager.js';
+import fs from 'fs';
 
-createResponder({
-    customId: "/obras/cadastro",
-    types: [ResponderType.Modal], 
-    cache: "cached",
-    async run(interaction) {
-        if (!interaction.isModalSubmit() || !interaction.guild) return;
-        
-        const { fields } = interaction;
-        const channelAtual = interaction.channel as SendableChannels;
+export async function monitorMangas(bot: any): Promise<void> {
+    
+    limparDuplicatas();
+    const mangas = getMangas();
 
-        const titulo = fields.getTextInputValue("titulo");
-        
-        // --- LÓGICA DE SEPARAÇÃO DOS LINKS ---
-        const textoLinks = fields.getTextInputValue("todos_links");
-        
-        // Quebra o texto onde tiver espaço, virgula ou quebra de linha
-        const listaUrls = textoLinks.split(/[\s,\n]+/).filter(url => url.startsWith("http"));
+    for (const manga of mangas) {
+        try {
+            const statusSakura = await verificarSeSaiuNoSakura(manga.urlBase, manga.lastChapter); 
 
-        // Procura quem é quem baseado no nome do site
-        const urlSakura = listaUrls.find(u => u.includes("sakura") || u.includes("lermanga") || u.includes("golden"));
-        const urlMangapark = listaUrls.find(u => u.includes("mangapark"));
-        const urlMangataro = listaUrls.find(u => u.includes("mangataro"));
+            if (statusSakura.saiu) {
+                const novoCapitulo = statusSakura.numero;
+                console.log(`[Monitor] Novo capítulo encontrado para ${manga.titulo}: ${novoCapitulo}`);
 
-        // Validação básica: O Sakura é obrigatório para o monitor funcionar
-        if (!urlSakura) {
-            await interaction.reply({ flags: ["Ephemeral"], content: "❌ **Erro:** Você precisa fornecer pelo menos o link do **Sakura** no campo de links." });
-            return;
+                const novaURLCapitulo = statusSakura.novaUrl; 
+                let nomeCapituloExtraido: string | null = null;
+
+                // --- 1. MANGAPARK ---
+                let linkFinalMangapark = "";
+                if (manga.urlMangapark) {
+                    const resultado = await buscarLinkNaObra(manga.urlMangapark, novoCapitulo);
+                    linkFinalMangapark = resultado.link;
+                    if (resultado.titulo) nomeCapituloExtraido = resultado.titulo;
+                } else {
+                    linkFinalMangapark = `https://mangapark.net/search?q=${encodeURIComponent(manga.titulo)}`;
+                }
+
+                // --- 2. MANGATARO ---
+                let urlMangataroFinal = manga.urlMangataro; 
+
+                // --- BOTÕES (LÓGICA SEGURA) ---
+                const buttons: ButtonBuilder[] = [];
+
+                // Botão 1: Sakura
+                buttons.push(
+                    new ButtonBuilder()
+                        .setLabel('Ler no Sakura')
+                        .setEmoji('🌸') 
+                        .setStyle(ButtonStyle.Link) 
+                        .setURL(novaURLCapitulo)
+                );
+
+                // Botão 2: MangaPark
+                if (linkFinalMangapark && linkFinalMangapark.startsWith('http')) {
+                    buttons.push(
+                        new ButtonBuilder()
+                            .setLabel('Mangapark')
+                            .setEmoji('🎢')
+                            .setStyle(ButtonStyle.Link)
+                            .setURL(linkFinalMangapark)
+                    );
+                }
+
+                // Botão 3: MangaTaro
+                if (urlMangataroFinal && urlMangataroFinal.startsWith('http')) {
+                    buttons.push(
+                        new ButtonBuilder()
+                            .setLabel('MangaTaro')
+                            .setEmoji('🎴')
+                            .setStyle(ButtonStyle.Link)
+                            .setURL(urlMangataroFinal)
+                    );
+                }
+
+                // Cria a Row apenas se houver botões
+                const row = new ActionRowBuilder<ButtonBuilder>().addComponents(buttons);
+
+                // --- MENSAGEM ---
+                let mensagemFinal = manga.mensagemPadrao || "O **capítulo {capitulo}** de @{titulo}, **\"{nome_capitulo}\"** já está disponível.\n\n*aproveitem e boa leitura.*";
+
+                const temTituloReal = nomeCapituloExtraido && 
+                                    nomeCapituloExtraido.trim() !== "" && 
+                                    !/^cap[íi]tulo\s*\d+$/i.test(nomeCapituloExtraido);
+
+                if (temTituloReal) {
+                    mensagemFinal = mensagemFinal.replace(/{nome_capitulo}/g, nomeCapituloExtraido!);
+                } else {
+                    mensagemFinal = mensagemFinal.replace(/, \*\*"{nome_capitulo}"\*\*/g, "");
+                    mensagemFinal = mensagemFinal.replace(/{nome_capitulo}/g, "");
+                }
+
+                mensagemFinal = mensagemFinal
+                    .replace(/{capitulo}/g, novoCapitulo.toString())
+                    .replace(/{titulo}/g, manga.titulo)
+                    .replace(/{link_sakura}/g, '') 
+                    .replace(/{link_mangapark}/g, '')
+                    .replace(/{link_mangataro}/g, '')
+                    .replace(/🌸 \*\*Sakura:\*\*/g, '')
+                    .replace(/🎢\*\*Mangapark:\*\*/g, '')
+                    .replace(/🎴 \*\*MangaTaro:\*\*/g, '');
+                
+                mensagemFinal = mensagemFinal.replace(/[ \t]{2,}/g, " ").replace(/ ,/g, ",");
+
+                // Envio
+                try {
+                    const channel = await bot.channels.fetch(manga.channelId);
+                    if (channel && channel.isTextBased()) {
+                        
+                        if ('guild' in channel) {
+                            const guild = channel.guild;
+                            const role = guild.roles.cache.find((r: any) => r.name.toLowerCase() === manga.titulo.toLowerCase());
+                            if (role) {
+                                mensagemFinal = mensagemFinal.replace(`@${manga.titulo}`, role.toString());
+                            }
+                        }
+
+                        const payload: any = { 
+                            content: mensagemFinal.trim(),
+                            components: [row] 
+                        };
+
+                        // --- TRATAMENTO DE IMAGEM ---
+                        if (manga.imagem) {
+                            // Se for link HTTP (antigo ou externo)
+                            if (manga.imagem.startsWith('http')) {
+                                // Tenta usar Embed para evitar erro de download do Discord
+                                const embed = new EmbedBuilder()
+                                    .setColor(0x2b2d31)
+                                    .setImage(manga.imagem);
+                                payload.embeds = [embed];
+                            } 
+                            // Se for arquivo local (novo sistema)
+                            else if (fs.existsSync(manga.imagem)) {
+                                payload.files = [manga.imagem];
+                            }
+                        }
+
+                        await channel.send(payload);
+                        console.log(`[Monitor] Mensagem enviada para ${manga.titulo}!`);
+                    }
+                } catch (error) {
+                    console.error(`[Monitor] Erro envio Discord:`, error);
+                }
+
+                // ATUALIZAÇÃO DO BANCO
+                const updatedManga: MangaEntry = {
+                    ...manga,
+                    lastChapter: novoCapitulo,
+                    urlBase: novaURLCapitulo 
+                };
+                
+                addManga(updatedManga);
+                console.log(`[Monitor] Banco atualizado: ${manga.titulo} agora está no Cap ${novoCapitulo}`);
+            }
+        } catch (err) {
+            console.error(`[Monitor] Erro processando ${manga.titulo}:`, err);
         }
-
-        // Pega o capítulo do link do Sakura
-        const match = urlSakura.match(/(\d+)\/?$/); 
-        if (!match) {
-            await interaction.reply({ flags: ["Ephemeral"], content: "❌ Não foi possível detectar o número do capítulo no link do Sakura." });
-            return;
-        }
-        const ultimoCap = parseInt(match[1]);
-        // Remove o número do final para criar a urlBase
-        const urlBase = urlSakura.substring(0, urlSakura.length - match[0].length) + '/';
-
-        // -------------------------------------
-
-        const mensagemPadrao = fields.getTextInputValue("mensagem");
-        const imagens = fields.getUploadedFiles("imagem"); 
-        const imagemAnexada = imagens?.first(); 
-
-        const canaisSelecionados = fields.getSelectedChannels("canal");
-        const canalDestino = canaisSelecionados ? canaisSelecionados.first() as SendableChannels : null;
-
-        if (!canalDestino) {
-            await interaction.reply({ flags: ["Ephemeral"], content: "❌ Canal inválido." });
-            return;
-        }
-
-        // Backup da Imagem
-        let urlImagemFinal = "";
-        if (imagemAnexada) {
-            try {
-                const msgBackup = await channelAtual.send({
-                    content: `**Backup de Imagem:** ${titulo} não apague essa mensagem`,
-                    files: [imagemAnexada.url] 
-                });
-                urlImagemFinal = msgBackup?.attachments.first()?.url || "";
-            } catch (e) { console.error(e); }
-        }
-
-        const newEntry: MangaEntry = {
-            titulo: titulo,
-            urlBase: urlBase,
-            lastChapter: ultimoCap, 
-            channelId: canalDestino.id,
-            mensagemPadrao: mensagemPadrao,
-            imagem: urlImagemFinal,
-            urlMangapark: urlMangapark, 
-            urlMangataro: urlMangataro,
-        };
-
-        addManga(newEntry);
-        
-        await interaction.reply({
-            content: `✅ **${titulo}** cadastrado!\n🌸 **Monitorando:** a partir do capítulo ${ultimoCap}\n🎢 **MangaPark:** ${urlMangapark ? 'Sim' : 'Não'}\n🎴 **MangaTaro:** ${urlMangataro ? 'Sim' : 'Não'}\n Para testar a mensagem utilize o comando /simular-novo-capitulo`
-        });
     }
-});
+}

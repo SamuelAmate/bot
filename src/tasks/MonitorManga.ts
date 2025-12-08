@@ -1,6 +1,7 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
 import { buscarLinkNaObra, verificarSeSaiuNoSakura } from '../utils/Scraper.js';
 import { addManga, getMangas, limparDuplicatas, MangaEntry } from '../utils/StateManager.js';
+import fs from 'fs';
 
 export async function monitorMangas(bot: any): Promise<void> {
     
@@ -28,15 +29,13 @@ export async function monitorMangas(bot: any): Promise<void> {
                     linkFinalMangapark = `https://mangapark.net/search?q=${encodeURIComponent(manga.titulo)}`;
                 }
 
-                // --- 2. MANGATARO (CORREÇÃO AQUI) ---
-                // Removemos as aspas para pegar o valor real do JSON
+                // --- 2. MANGATARO ---
                 let urlMangataroFinal = manga.urlMangataro; 
 
                 // --- BOTÕES (LÓGICA SEGURA) ---
-                // Criamos um array de botões e só adicionamos os que têm links válidos
                 const buttons: ButtonBuilder[] = [];
 
-                // Botão 1: Sakura (Sempre existe se entrou aqui)
+                // Botão 1: Sakura
                 buttons.push(
                     new ButtonBuilder()
                         .setLabel('Ler no Sakura')
@@ -45,7 +44,7 @@ export async function monitorMangas(bot: any): Promise<void> {
                         .setURL(novaURLCapitulo)
                 );
 
-                // Botão 2: MangaPark (Verifica se é link válido)
+                // Botão 2: MangaPark
                 if (linkFinalMangapark && linkFinalMangapark.startsWith('http')) {
                     buttons.push(
                         new ButtonBuilder()
@@ -56,7 +55,7 @@ export async function monitorMangas(bot: any): Promise<void> {
                     );
                 }
 
-                // Botão 3: MangaTaro (Verifica se existe no JSON e se é link válido)
+                // Botão 3: MangaTaro
                 if (urlMangataroFinal && urlMangataroFinal.startsWith('http')) {
                     buttons.push(
                         new ButtonBuilder()
@@ -67,13 +66,12 @@ export async function monitorMangas(bot: any): Promise<void> {
                     );
                 }
 
-                // Cria a Row apenas com os botões válidos
+                // Cria a Row apenas se houver botões
                 const row = new ActionRowBuilder<ButtonBuilder>().addComponents(buttons);
 
                 // --- MENSAGEM ---
                 let mensagemFinal = manga.mensagemPadrao || "O **capítulo {capitulo}** de @{titulo}, **\"{nome_capitulo}\"** já está disponível.\n\n*aproveitem e boa leitura.*";
 
-                // Validação do Título
                 const temTituloReal = nomeCapituloExtraido && 
                                     nomeCapituloExtraido.trim() !== "" && 
                                     !/^cap[íi]tulo\s*\d+$/i.test(nomeCapituloExtraido);
@@ -81,12 +79,10 @@ export async function monitorMangas(bot: any): Promise<void> {
                 if (temTituloReal) {
                     mensagemFinal = mensagemFinal.replace(/{nome_capitulo}/g, nomeCapituloExtraido!);
                 } else {
-                    // SE NÃO TIVER TÍTULO:
                     mensagemFinal = mensagemFinal.replace(/, \*\*"{nome_capitulo}"\*\*/g, "");
                     mensagemFinal = mensagemFinal.replace(/{nome_capitulo}/g, "");
                 }
 
-                // Substituições Finais
                 mensagemFinal = mensagemFinal
                     .replace(/{capitulo}/g, novoCapitulo.toString())
                     .replace(/{titulo}/g, manga.titulo)
@@ -97,7 +93,6 @@ export async function monitorMangas(bot: any): Promise<void> {
                     .replace(/🎢\*\*Mangapark:\*\*/g, '')
                     .replace(/🎴 \*\*MangaTaro:\*\*/g, '');
                 
-                // Limpeza de espaços duplos
                 mensagemFinal = mensagemFinal.replace(/[ \t]{2,}/g, " ").replace(/ ,/g, ",");
 
                 // Envio
@@ -118,12 +113,24 @@ export async function monitorMangas(bot: any): Promise<void> {
                             components: [row] 
                         };
 
+                        // --- TRATAMENTO DE IMAGEM ---
                         if (manga.imagem) {
-                            payload.files = [manga.imagem];
+                            // Se for link HTTP (antigo ou externo)
+                            if (manga.imagem.startsWith('http')) {
+                                // Tenta usar Embed para evitar erro de download do Discord
+                                const embed = new EmbedBuilder()
+                                    .setColor(0x2b2d31)
+                                    .setImage(manga.imagem);
+                                payload.embeds = [embed];
+                            } 
+                            // Se for arquivo local (novo sistema)
+                            else if (fs.existsSync(manga.imagem)) {
+                                payload.files = [manga.imagem];
+                            }
                         }
 
                         await channel.send(payload);
-                        console.log(`[Monitor] Mensagem enviada!`);
+                        console.log(`[Monitor] Mensagem enviada para ${manga.titulo}!`);
                     }
                 } catch (error) {
                     console.error(`[Monitor] Erro envio Discord:`, error);
