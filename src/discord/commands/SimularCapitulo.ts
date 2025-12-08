@@ -1,10 +1,11 @@
 import { createCommand } from "#base";
-import { ApplicationCommandType, TextChannel, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
+import { ActionRowBuilder, ApplicationCommandType, ButtonBuilder, ButtonStyle, SendableChannels } from "discord.js";
 import { getMangas } from '../../utils/StateManager.js';
+import fs from 'fs'; // Importante para verificar a imagem local
 
 createCommand({
     name: "simular-novo-capitulo",
-    description: "Gera uma prévia visual da mensagem de notificação.",
+    description: "Gera uma prévia visual da mensagem de notificação neste canal.",
     type: ApplicationCommandType.ChatInput,
     options: [
         {
@@ -17,7 +18,7 @@ createCommand({
     async run(interaction) {
         if (!interaction.isChatInputCommand() || !interaction.guild) return;
 
-        // Apenas confirma para quem digitou que o processo iniciou (invisível para os outros)
+        // Confirma apenas para você que o comando foi recebido
         await interaction.deferReply({ ephemeral: true });
 
         const tituloParaSimular = interaction.options.getString("titulo", true);
@@ -25,21 +26,24 @@ createCommand({
         const manga = mangas.find(m => m.titulo?.toLowerCase() === tituloParaSimular.toLowerCase());
 
         if (!manga) {
-            await interaction.editReply(`❌ Obra "${tituloParaSimular}" não encontrada no banco de dados.`);
+            await interaction.editReply(`❌ Obra **"${tituloParaSimular}"** não encontrada no banco de dados.`);
             return;
         }
 
-        const channel = await interaction.client.channels.fetch(manga.channelId).catch(() => null);
-        if (!channel || !channel.isTextBased()) {
-            await interaction.editReply(`❌ Canal de notificação configurado não é válido.`);
+        // --- MUDANÇA PRINCIPAL AQUI ---
+        // Em vez de buscar manga.channelId, pegamos o canal atual da interação
+        const channel = interaction.channel as SendableChannels;
+
+        if (!channel) {
+            await interaction.editReply(`❌ Não foi possível identificar o canal atual.`);
             return;
         }
 
         // --- 1. DADOS FAKE (SIMULAÇÃO) ---
         const capituloSimulado = manga.lastChapter + 1;
-        const tituloCapituloSimulado = "Título de Exemplo"; // Texto fixo para você ver como fica
+        const tituloCapituloSimulado = "Título do Capítulo (Simulação)"; 
 
-        // Gera URLs falsas baseadas no padrão (sem verificar se existem)
+        // Gera URLs falsas baseadas no padrão
         let novaUrlSakura = "";
         const match = manga.urlBase.match(/(\d+)\/?$/);
         if (match) {
@@ -48,39 +52,56 @@ createCommand({
             novaUrlSakura = `${manga.urlBase}${capituloSimulado}/`;
         }
 
-        // --- 2. MONTAGEM DOS BOTÕES ---
-        const row = new ActionRowBuilder<ButtonBuilder>()
-            .addComponents(
-                new ButtonBuilder()
-                    .setLabel('Ler no Sakura')
-                    .setEmoji('🌸') 
-                    .setStyle(ButtonStyle.Link) 
-                    .setURL(novaUrlSakura), 
+        // --- 2. MONTAGEM DOS BOTÕES (Lógica Segura) ---
+        const buttons: ButtonBuilder[] = [];
+
+        // Botão Sakura
+        buttons.push(
+            new ButtonBuilder()
+                .setLabel('Ler no Sakura')
+                .setEmoji('🌸') 
+                .setStyle(ButtonStyle.Link) 
+                .setURL(novaUrlSakura)
+        );
+
+        // Botão MangaPark
+        if (manga.urlMangapark && manga.urlMangapark.startsWith('http')) {
+            buttons.push(
                 new ButtonBuilder()
                     .setLabel('Mangapark')
                     .setEmoji('🎢')
                     .setStyle(ButtonStyle.Link)
-                    .setURL(manga.urlMangapark || "https://mangapark.net"),
+                    .setURL(manga.urlMangapark)
+            );
+        }
+
+        // Botão MangaTaro
+        if (manga.urlMangataro && manga.urlMangataro.startsWith('http')) {
+            buttons.push(
                 new ButtonBuilder()
                     .setLabel('MangaTaro')
                     .setEmoji('🎴')
                     .setStyle(ButtonStyle.Link)
-                    .setURL(manga.urlMangataro || "https://mangataro.org/home")
+                    .setURL(manga.urlMangataro)
             );
+        }
 
-        // --- 3. MONTAGEM DO TEXTO (Lógica Idêntica ao Monitor) ---
+        const row = new ActionRowBuilder<ButtonBuilder>().addComponents(buttons);
+
+        // --- 3. MONTAGEM DO TEXTO ---
         let mensagemFinal = manga.mensagemPadrao || "O **capítulo {capitulo}** de @{titulo}, **\"{nome_capitulo}\"** já está disponível.\n\n*aproveitem e boa leitura.*";
 
-        // Aplica o título fake
         mensagemFinal = mensagemFinal.replace(/{nome_capitulo}/g, tituloCapituloSimulado);
 
-        // Substituições Padrão
         mensagemFinal = mensagemFinal
             .replace(/{capitulo}/g, capituloSimulado.toString())
             .replace(/{titulo}/g, manga.titulo)
             .replace(/{link_sakura}/g, '') 
             .replace(/{link_mangapark}/g, '')
-            .replace(/{link_mangataro}/g, '');
+            .replace(/{link_mangataro}/g, '')
+            .replace(/🌸 \*\*Sakura:\*\*/g, '')
+            .replace(/🎢\*\*Mangapark:\*\*/g, '')
+            .replace(/🎴 \*\*MangaTaro:\*\*/g, '');
         
         // Limpeza
         mensagemFinal = mensagemFinal.replace(/[ \t]{2,}/g, " ").replace(/ ,/g, ",");
@@ -90,31 +111,36 @@ createCommand({
         if (role) {
             mensagemFinal = mensagemFinal.replace(`@${manga.titulo}`, role.toString());
         } else {
-            // Se não tiver cargo criado, deixa em negrito pra não ficar feio na simulação
-            mensagemFinal = mensagemFinal.replace(`@${manga.titulo}`, `**${manga.titulo}**`);
+            // Se não tiver cargo, deixa em negrito apenas visualmente
+            mensagemFinal = mensagemFinal.replace(`@${manga.titulo}`, `**@${manga.titulo}**`);
         }
 
         // --- 5. ENVIO ---
         try {
-            const textChannel = channel as TextChannel;
-            
             const payload: any = { 
                 content: mensagemFinal.trim(),
                 components: [row] 
             };
 
-            // Se tiver imagem salva no JSON, anexa ela
+            // Tratamento de Imagem (Local ou URL)
             if (manga.imagem) {
-                payload.files = [manga.imagem];
+                if (fs.existsSync(manga.imagem)) {
+                    // Se for arquivo local
+                    payload.files = [manga.imagem];
+                } else if (manga.imagem.startsWith('http')) {
+                    // Se for URL antiga (legado)
+                    payload.content += `\n${manga.imagem}`; // Anexa link no fim se não der pra fazer upload
+                }
             }
 
-            await textChannel.send(payload);
+            // Envia no canal ATUAL
+            await channel.send(payload);
 
-            await interaction.editReply(`✅ **Visualização enviada!** Verifique o canal ${textChannel}.`);
+            await interaction.editReply(`✅ **Simulação enviada abaixo!**`);
 
         } catch (error) {
             console.error(error);
-            await interaction.editReply(`❌ Erro ao enviar mensagem: ${(error as Error).message}`);
+            await interaction.editReply(`❌ Erro ao enviar mensagem neste canal: ${(error as Error).message}`);
         }
     }
 });

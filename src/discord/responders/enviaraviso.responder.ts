@@ -2,9 +2,20 @@ import { createResponder, ResponderType } from "#base";
 import axios from "axios";
 import * as cheerio from "cheerio";
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, SendableChannels } from "discord.js";
+import fs from 'fs';
+import path from 'path';
+import { pipeline } from 'stream/promises';
 
-// URL do seu FlareSolverr (mesma que você usa no scraper)
-const FLARESOLVERR_URL = process.env.FLARESOLVERR_URL || 'http://localhost:8191/v1';
+// --- CONFIGURAÇÃO ROBUSTA DA URL DO FLARESOLVERR ---
+// Pega a URL base e garante que termine com /v1
+const BASE_URL = process.env.FLARESOLVERR_URL || 'http://localhost:8191';
+const FLARESOLVERR_API = `${BASE_URL.replace(/\/$/, '')}/v1`;
+
+// --- CONFIGURAÇÃO DA PASTA DE IMAGENS ---
+const IMAGE_DIR = path.resolve(process.cwd(), 'imagens');
+if (!fs.existsSync(IMAGE_DIR)) {
+    fs.mkdirSync(IMAGE_DIR, { recursive: true });
+}
 
 createResponder({
     customId: "enviar-post-semanal",
@@ -13,7 +24,7 @@ createResponder({
     async run(interaction): Promise<void> {
         if (!interaction.isModalSubmit() || !interaction.guild) return;
 
-        // Defer Update é crucial aqui pois o FlareSolverr pode demorar uns segundos
+        // Defer Update é crucial aqui pois o FlareSolverr pode demorar
         await interaction.deferUpdate().catch(console.error);
 
         try {
@@ -30,135 +41,157 @@ createResponder({
 
             let mensagemTexto = fields.getTextInputValue("mensagem");
 
-            // 2. Imagem (Backup)
+            // 2. Imagem (Download Local Seguro)
             const imagens = fields.getUploadedFiles("imagem");
             const imagemAnexada = imagens?.first();
-            let urlImagemFinal = "";
-            const canalAtual = interaction.channel as SendableChannels;
+            let caminhoImagemLocal = "";
 
             if (imagemAnexada) {
                 try {
-                    const msgBackup = await canalAtual.send({
-                        content: `📦 **Backup Post Semanal** (Não apague)`,
-                        files: [imagemAnexada.url] 
-                    });
-                    urlImagemFinal = msgBackup?.attachments.first()?.url || imagemAnexada.url;
-                } catch (e) { 
-                    urlImagemFinal = imagemAnexada.url; 
+                    console.log(`[Post Semanal] Baixando imagem: ${imagemAnexada.url}`);
+                    
+                    // Gera nome único para o arquivo temporário do post semanal
+                    const timestamp = Date.now();
+                    const extensao = path.extname(imagemAnexada.name) || '.png';
+                    const nomeArquivo = `post_semanal_${timestamp}${extensao}`;
+                    const caminhoCompleto = path.join(IMAGE_DIR, nomeArquivo);
+
+                    // Download
+                    const response = await axios.get(imagemAnexada.url, { responseType: 'stream' });
+                    await pipeline(response.data, fs.createWriteStream(caminhoCompleto));
+
+                    caminhoImagemLocal = caminhoCompleto;
+                    console.log(`[Post Semanal] Imagem salva em: ${caminhoImagemLocal}`);
+
+                } catch (e) {
+                    console.error("[Post Semanal] Erro ao baixar imagem:", e);
+                    // Segue sem imagem se der erro
                 }
             }
 
-            // --- 3. SCRAPING ROBUSTO (COM RETRY) ---
-            console.log("--- [DEBUG] INICIANDO SCRAPING VIA FLARESOLVERR ---");
+            // --- 3. SCRAPING ROBUSTO ---
+            console.log(`--- [DEBUG] INICIANDO SCRAPING EM: ${FLARESOLVERR_API} ---`);
             
-            // Criamos uma sessão para manter o navegador aberto entre tentativas
             const sessionID = `sessao_${Date.now()}`;
             let html = "";
             let sucessoScraping = false;
 
             try {
                 // Cria sessão
-                await axios.post(FLARESOLVERR_URL, { cmd: 'sessions.create', session: sessionID });
+                await axios.post(FLARESOLVERR_API, { cmd: 'sessions.create', session: sessionID });
 
-                // Tenta até 5 vezes se o HTML vier incompleto
-                for (let tentativa = 1; tentativa <= 5; tentativa++) {
-                    console.log(`[DEBUG] Tentativa ${tentativa}/5 buscando site...`);
+                // Tenta até 3 vezes (reduzi para 3 para ser mais ágil)
+                for (let tentativa = 1; tentativa <= 3; tentativa++) {
+                    console.log(`[DEBUG] Tentativa ${tentativa}/3 buscando site...`);
 
-                    const response = await axios.post(FLARESOLVERR_URL, {
-                        cmd: 'request.get',
-                        url: "https://sandwiche.me/sirius",
-                        maxTimeout: 60000, 
-                        session: sessionID
-                    });
+                    try {
+                        const response = await axios.post(FLARESOLVERR_API, {
+                            cmd: 'request.get',
+                            url: "https://sandwiche.me/sirius",
+                            maxTimeout: 60000, 
+                            session: sessionID
+                        });
 
-                    if (response.data.status === 'ok') {
-                        html = response.data.solution.response;
-                        
-                        // Validação: Se o HTML for muito pequeno (< 30k), é só a tela de loading.
-                        // O site carregado corretamente tem +50k caracteres.
-                        if (html.length > 30000) {
-                            console.log(`[DEBUG] Sucesso! Site carregado (${html.length} chars).`);
-                            sucessoScraping = true;
-                            break; 
-                        } else {
-                            console.warn(`[DEBUG] Site incompleto (${html.length} chars). Aguardando...`);
+                        if (response.data.status === 'ok') {
+                            html = response.data.solution.response;
+                            
+                            // Validação de tamanho
+                            if (html.length > 30000) {
+                                console.log(`[DEBUG] Sucesso! Site carregado (${html.length} chars).`);
+                                sucessoScraping = true;
+                                break; 
+                            } else {
+                                console.warn(`[DEBUG] Site incompleto (${html.length} chars).`);
+                            }
                         }
+                    } catch (reqErr) {
+                        console.warn(`[DEBUG] Erro na requisição: ${(reqErr as Error).message}`);
                     }
 
-                    // Espera 3s antes da próxima tentativa
+                    // Espera 3s
                     if (tentativa < 3) await new Promise(r => setTimeout(r, 3000));
                 }
 
                 if (!sucessoScraping) {
-                    console.error("❌ Falha: O site não carregou completamente após 3 tentativas.");
+                    console.error("❌ Falha no scraping do Sandwiche. Enviando sem menções automáticas.");
                 } else {
-                    // PROCESSAMENTO DO HTML
+                    // PROCESSAMENTO DO HTML (CHEERIO)
                     const $ = cheerio.load(html);
                     const nomesObrasUnicos = new Set<string>();
 
                     let elementosEncontrados = $(".text-link-button-text-color");
 
-                    // Fallback
+                    // Fallback de busca
                     if (elementosEncontrados.length === 0) {
                         console.log("[DEBUG] Busca padrão falhou, tentando busca ampla...");
                         $("p, span, div, a").each((_, el) => {
                             const txt = $(el).text().trim();
                             if (txt.match(/^.+\(\d+(\.\d+)?\)$/)) {
-                                elementosEncontrados = elementosEncontrados.add(el); 
+                                // Adiciona o elemento ao conjunto do Cheerio
+                                // Nota: Cheerio não tem .add() direto em listas node, então recriamos
+                                // Para simplificar, vamos processar direto aqui se cair no fallback
+                                const match = txt.match(/^(.*?)\s*\(\d+(?:\.\d+)?\)$/);
+                                if (match && match[1]) {
+                                    const nomeLimpo = match[1].trim();
+                                    if (nomeLimpo.length > 2) nomesObrasUnicos.add(nomeLimpo);
+                                }
+                            }
+                        });
+                    } else {
+                        // Processamento padrão
+                        elementosEncontrados.each((i, element) => {
+                            const textoCompleto = $(element).text().trim();
+                            const match = textoCompleto.match(/^(.*?)\s*\(\d+(?:\.\d+)?\)$/);
+
+                            if (match && match[1]) {
+                                const nomeLimpo = match[1].trim();
+                                if (nomeLimpo.length > 2) {
+                                    nomesObrasUnicos.add(nomeLimpo);
+                                }
                             }
                         });
                     }
 
-                    console.log(`[DEBUG] Elementos encontrados: ${elementosEncontrados.length}`);
-
-                    elementosEncontrados.each((i, element) => {
-                        const textoCompleto = $(element).text().trim();
-                        // Regex: Pega nome antes do parenteses ex: "Obra (10)"
-                        const match = textoCompleto.match(/^(.*?)\s*\(\d+(?:\.\d+)?\)$/);
-
-                        if (match && match[1]) {
-                            const nomeLimpo = match[1].trim();
-                            if (nomeLimpo.length > 2 && !nomesObrasUnicos.has(nomeLimpo)) {
-                                nomesObrasUnicos.add(nomeLimpo);
-                                console.log(`[DEBUG] Obra: "${nomeLimpo}"`);
-                            }
-                        }
-                    });
+                    console.log(`[DEBUG] Obras encontradas: ${Array.from(nomesObrasUnicos).join(', ')}`);
 
                     // Comparação com Cargos
                     const mencoesParaAdicionar: string[] = [];
                     const guildRoles = interaction.guild.roles.cache;
 
                     for (const nomeObra of nomesObrasUnicos) {
+                        // Busca case-insensitive
                         const role = guildRoles.find(r => r.name.toLowerCase() === nomeObra.toLowerCase());
                         if (role) {
-                            console.log(`[DEBUG] Cargo vinculado: ${role.name}`);
                             mencoesParaAdicionar.push(role.toString());
                         }
                     }
 
                     if (mencoesParaAdicionar.length > 0) {
+                        // Adiciona as menções ao final da mensagem
                         mensagemTexto += `\n\n${mencoesParaAdicionar.join(" ")}`;
                     }
                 }
 
             } catch (err) {
-                console.error("[DEBUG] ERRO NO SCRAPING:", err);
+                console.error("[DEBUG] ERRO NO PROCESSO DE SCRAPING:", err);
             } finally {
-                // Limpa a sessão para não pesar a memória
-                await axios.post(FLARESOLVERR_URL, { cmd: 'sessions.destroy', session: sessionID }).catch(() => {});
+                // Limpa a sessão
+                await axios.post(FLARESOLVERR_API, { cmd: 'sessions.destroy', session: sessionID }).catch(() => {});
             }
-            console.log("--- [DEBUG] FIM ---");
+            console.log("--- [DEBUG] FIM SCRAPING ---");
 
-            // 4. Menção Manual (@Cargo no texto)
+            // 4. Menção Manual (@Cargo no texto) - Caso o usuário tenha digitado manualmente
             interaction.guild.roles.cache.forEach(cargo => {
-                const regex = new RegExp(`@${cargo.name}`, 'gi');
+                // Escape para caracteres especiais no nome do cargo
+                const nomeCargoSafe = cargo.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const regex = new RegExp(`@${nomeCargoSafe}`, 'gi');
+                
                 if (regex.test(mensagemTexto)) {
                     mensagemTexto = mensagemTexto.replace(regex, cargo.toString());
                 }
             });
 
-            // 5. Envio
+            // 5. Envio Final
             const row = new ActionRowBuilder<ButtonBuilder>()
                 .addComponents(
                     new ButtonBuilder()
@@ -173,8 +206,9 @@ createResponder({
                 components: [row]
             };
 
-            if (urlImagemFinal) {
-                payload.files = [urlImagemFinal];
+            // Anexa o arquivo local se existir
+            if (caminhoImagemLocal) {
+                payload.files = [caminhoImagemLocal];
             }
 
             await canalDestino.send(payload);
@@ -183,10 +217,20 @@ createResponder({
                 content: `✅ Post enviado com sucesso no canal ${canalDestino}!` 
             });
 
+            // Opcional: Limpar a imagem temporária depois de enviar (para economizar espaço)
+            // Se você quiser manter um histórico, remova estas linhas:
+            /*
+            if (caminhoImagemLocal) {
+                setTimeout(() => {
+                    try { fs.unlinkSync(caminhoImagemLocal); } catch(e) {}
+                }, 10000); // Deleta após 10 segundos
+            }
+            */
+
         } catch (error) {
             console.error(error);
             await interaction.followUp({ 
-                content: `❌ Erro: ${(error as Error).message}` 
+                content: `❌ Erro fatal: ${(error as Error).message}` 
             }).catch(() => {});
         }
     }
