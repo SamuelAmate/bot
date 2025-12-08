@@ -45,11 +45,11 @@ createCommand({
                 title: `Editar: ${manga.titulo.substring(0, 30)}`,
                 components: createModalFields(
                     createLabel(
-                        "Url",
+                        "Url (Sakura)",
                         "Novo link do último capítulo no Sakura",
                         createTextInput({ 
                             customId: "nova_url", 
-                            required: true,
+                            required: true, 
                             value: urlCompletaAtual 
                         })
                     ),
@@ -72,9 +72,10 @@ createCommand({
                             maxValues: 1
                         })
                     ),
+                    // Campo "oculto" para passar o título original para o responder
                     createLabel(
-                        "Obra (Não alterar)", 
-                        "Identificador da obra para envio dos dados",
+                        "Obra (NÃO ALTERAR)", 
+                        "Identificador interno da obra",
                         createTextInput({
                             customId: "titulo_referencia",
                             required: true,
