@@ -21,12 +21,12 @@ createCommand({
                 ),
                 createLabel(
                     "Links (Sakura, MangaPark, MangaTaro)",
-                    "Cole os links aqui (um por linha ou separados por espaço) - O link do Sakura deve ser do último capítulo postado e do MangaPark/MangaTaro devem ser o link da página da obra.",
+                    "Cole 1 link por linha. Sakura usar link do ultimo capitulo, os demais da pagina da obra",
                     createTextInput({
                         customId: "todos_links",
                         required: true,
                         style: TextInputStyle.Paragraph,
-                        placeholder: "https://sakuramangas.org/obras/witchriv/7/\nhttps://mangapark.io/title/431933-pt_br-witchriv\nhttps://mangataro.org/manga/witchriv"
+                        placeholder: "https://sakuramangas.org/obras/witchriv/7/\nhttps://mangapark.io/\nhttps://mangataro.org"
                     })
                 ),
                 createLabel(
