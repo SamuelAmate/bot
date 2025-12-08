@@ -28,28 +28,47 @@ export async function monitorMangas(bot: any): Promise<void> {
                     linkFinalMangapark = `https://mangapark.net/search?q=${encodeURIComponent(manga.titulo)}`;
                 }
 
-                // --- 2. MANGATARO ---
-                let urlMangataroFinal = "manga.urlMangataro";
+                // --- 2. MANGATARO (CORREÇÃO AQUI) ---
+                // Removemos as aspas para pegar o valor real do JSON
+                let urlMangataroFinal = manga.urlMangataro; 
 
-                // --- BOTÕES ---
-                const row = new ActionRowBuilder<ButtonBuilder>()
-                    .addComponents(
-                        new ButtonBuilder()
-                            .setLabel('Ler no Sakura')
-                            .setEmoji('🌸') 
-                            .setStyle(ButtonStyle.Link) 
-                            .setURL(novaURLCapitulo), 
+                // --- BOTÕES (LÓGICA SEGURA) ---
+                // Criamos um array de botões e só adicionamos os que têm links válidos
+                const buttons: ButtonBuilder[] = [];
+
+                // Botão 1: Sakura (Sempre existe se entrou aqui)
+                buttons.push(
+                    new ButtonBuilder()
+                        .setLabel('Ler no Sakura')
+                        .setEmoji('🌸') 
+                        .setStyle(ButtonStyle.Link) 
+                        .setURL(novaURLCapitulo)
+                );
+
+                // Botão 2: MangaPark (Verifica se é link válido)
+                if (linkFinalMangapark && linkFinalMangapark.startsWith('http')) {
+                    buttons.push(
                         new ButtonBuilder()
                             .setLabel('Mangapark')
                             .setEmoji('🎢')
                             .setStyle(ButtonStyle.Link)
-                            .setURL(linkFinalMangapark),
+                            .setURL(linkFinalMangapark)
+                    );
+                }
+
+                // Botão 3: MangaTaro (Verifica se existe no JSON e se é link válido)
+                if (urlMangataroFinal && urlMangataroFinal.startsWith('http')) {
+                    buttons.push(
                         new ButtonBuilder()
                             .setLabel('MangaTaro')
                             .setEmoji('🎴')
                             .setStyle(ButtonStyle.Link)
                             .setURL(urlMangataroFinal)
                     );
+                }
+
+                // Cria a Row apenas com os botões válidos
+                const row = new ActionRowBuilder<ButtonBuilder>().addComponents(buttons);
 
                 // --- MENSAGEM ---
                 let mensagemFinal = manga.mensagemPadrao || "O **capítulo {capitulo}** de @{titulo}, **\"{nome_capitulo}\"** já está disponível.\n\n*aproveitem e boa leitura.*";
@@ -63,9 +82,7 @@ export async function monitorMangas(bot: any): Promise<void> {
                     mensagemFinal = mensagemFinal.replace(/{nome_capitulo}/g, nomeCapituloExtraido!);
                 } else {
                     // SE NÃO TIVER TÍTULO:
-                    // Remove: , "**{nome_capitulo}**"
                     mensagemFinal = mensagemFinal.replace(/, \*\*"{nome_capitulo}"\*\*/g, "");
-                    // Limpa sobras
                     mensagemFinal = mensagemFinal.replace(/{nome_capitulo}/g, "");
                 }
 
@@ -80,7 +97,7 @@ export async function monitorMangas(bot: any): Promise<void> {
                     .replace(/🎢\*\*Mangapark:\*\*/g, '')
                     .replace(/🎴 \*\*MangaTaro:\*\*/g, '');
                 
-                //  CORREÇÃO DOS ENTERS: Apenas limpa espaços duplos horizontais, mas preserva \n
+                // Limpeza de espaços duplos
                 mensagemFinal = mensagemFinal.replace(/[ \t]{2,}/g, " ").replace(/ ,/g, ",");
 
                 // Envio
