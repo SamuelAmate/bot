@@ -90,7 +90,7 @@ createCommand({
         const row = new ActionRowBuilder<ButtonBuilder>().addComponents(buttons);
 
         // --- 3. MONTAGEM DO TEXTO ---
-        let mensagemFinal = manga.mensagemPadrao || "O **capítulo {capitulo}** de @{titulo}, **\"{nome_capitulo}\"** já está disponível.\n\n*aproveitem e boa leitura.*";
+        let mensagemFinal = manga.mensagemPadrao || "Simulação - O **capítulo {capitulo}** de @{titulo}, **\"{nome_capitulo}\"** já está disponível.\n\n*aproveitem e boa leitura.*";
 
         mensagemFinal = mensagemFinal.replace(/{nome_capitulo}/g, tituloCapituloSimulado);
 
