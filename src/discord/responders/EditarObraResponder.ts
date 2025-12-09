@@ -110,7 +110,7 @@ createResponder({
 
             await interaction.editReply({
                 content: `✅ **${mangaOriginal.titulo}** editada com sucesso!
-🌸 **Monitorando a partir de:** Cap ${novoCap}
+    **Monitorando a partir de:** Capítulo ${novoCap}
     **Imagem:** ${imagemAnexada ? "Atualizada" : "Mantida"}`
             });
             console.log("[RESPONDER] Sucesso!");
