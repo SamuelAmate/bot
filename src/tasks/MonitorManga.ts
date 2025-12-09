@@ -128,7 +128,7 @@ function construirBotoes(linkSakura: string, linkMP: string, linkMangataro?: str
     if (linkMP && linkMP.startsWith('http')) {
         const isGeneric = !linkMP.includes('chapter') && !linkMP.includes('ch.'); // Detecção simples se é genérico
         const emoji = isGeneric ? '🏠' : '🎢'; // Casa se for home, Montanha Russa se for cap
-        const label = isGeneric ? 'Obra no Mangapark' : 'Ler no Mangapark';
+        const label = isGeneric ? 'Ler no Mangapark' : 'Ler no Mangapark';
 
         buttons.push(new ButtonBuilder().setLabel(label).setEmoji(emoji).setStyle(ButtonStyle.Link).setURL(linkMP));
     }
