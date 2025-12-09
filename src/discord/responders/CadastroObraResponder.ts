@@ -99,7 +99,7 @@ createResponder({
 
                 } catch (e) { 
                     console.error("[Cadastro] ERRO CRÍTICO AO BAIXAR IMAGEM:", e);
-                    await interaction.editReply({ content: `⚠️ **Erro ao salvar a imagem.**\nO cadastro foi cancelado.\nErro: ${e}` });
+                    await interaction.editReply({ content: `❌ **Erro ao salvar a imagem.**\nO cadastro foi cancelado.\nErro: ${e}` });
                     return;
                 }
             } else {
@@ -124,7 +124,7 @@ createResponder({
             console.log("[Cadastro] Dados salvos com sucesso!");
             
             await interaction.editReply({
-                content: `✅ **${titulo}** cadastrado com sucesso!\n📁 **Imagem:** ${caminhoImagemLocal ? 'Salva no servidor' : 'Nenhuma'}\n🌸 **Monitorando:** a partir do Cap ${ultimoCap}`
+                content: `✅ **${titulo}** cadastrado com sucesso!\n **Imagem:** ${caminhoImagemLocal ? 'Salva no servidor' : 'Nenhuma'}\n🌸 **Monitorando:** a partir do Cap ${ultimoCap}`
             });
 
         } catch (err) {

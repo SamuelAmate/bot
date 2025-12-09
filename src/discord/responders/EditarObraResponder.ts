@@ -92,7 +92,7 @@ createResponder({
 
                 } catch (e) {
                     console.error("[RESPONDER] Erro ao baixar nova imagem:", e);
-                    await interaction.editReply({ content: "⚠️ Erro ao salvar a nova imagem. As outras alterações foram salvas, mas a imagem antiga foi mantida." });
+                    await interaction.editReply({ content: "❌ Erro ao salvar a nova imagem. As outras alterações foram salvas, mas a imagem antiga foi mantida." });
                     // Não damos return aqui para salvar o resto das alterações
                 }
             }
@@ -111,7 +111,7 @@ createResponder({
             await interaction.editReply({
                 content: `✅ **${mangaOriginal.titulo}** editada com sucesso!
 🌸 **Monitorando a partir de:** Cap ${novoCap}
-📁 **Imagem:** ${imagemAnexada ? "Atualizada no servidor" : "Mantida"}`
+    **Imagem:** ${imagemAnexada ? "Atualizada" : "Mantida"}`
             });
             console.log("[RESPONDER] Sucesso!");
 

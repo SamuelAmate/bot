@@ -1,7 +1,7 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
+import fs from 'fs';
 import { buscarLinkNaObra, verificarSeSaiuNoSakura } from '../utils/Scraper.js';
 import { addManga, getMangas, limparDuplicatas, MangaEntry } from '../utils/StateManager.js';
-import fs from 'fs';
 
 export async function monitorMangas(bot: any): Promise<void> {
     
@@ -48,7 +48,7 @@ export async function monitorMangas(bot: any): Promise<void> {
                 if (linkFinalMangapark && linkFinalMangapark.startsWith('http')) {
                     buttons.push(
                         new ButtonBuilder()
-                            .setLabel('Mangapark')
+                            .setLabel('Ler no Mangapark')
                             .setEmoji('🎢')
                             .setStyle(ButtonStyle.Link)
                             .setURL(linkFinalMangapark)
@@ -59,7 +59,7 @@ export async function monitorMangas(bot: any): Promise<void> {
                 if (urlMangataroFinal && urlMangataroFinal.startsWith('http')) {
                     buttons.push(
                         new ButtonBuilder()
-                            .setLabel('MangaTaro')
+                            .setLabel('Ler no MangaTaro')
                             .setEmoji('🎴')
                             .setStyle(ButtonStyle.Link)
                             .setURL(urlMangataroFinal)
