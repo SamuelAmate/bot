@@ -17,88 +17,60 @@ export async function wakeUpRender(): Promise<void> {
     }
 }
 
-// --- LÓGICA DE CAPÍTULOS DECIMAIS ---
+// --- LÓGICA DE CAPÍTULOS (COM DECIMAIS) ---
 function gerarCandidatos(capituloAtual: number): number[] {
     const candidatos: number[] = [];
-    
-    // Função auxiliar para evitar "8.2000004"
     const fix = (n: number) => parseFloat(n.toFixed(1));
     const baseInteira = Math.floor(capituloAtual);
 
-    // 1. Tenta o próximo decimal direto (ex: 69.1 -> 69.2)
-    candidatos.push(fix(capituloAtual + 0.1));
+    candidatos.push(fix(capituloAtual + 0.1)); // 69.1 -> 69.2
+    
+    const atualMeio = baseInteira + 0.5; // 69.5
+    if (atualMeio > capituloAtual) candidatos.push(atualMeio);
 
-    // 2. Tenta o .5 da série atual (ex: 69.2 -> 69.5)
-    // Só adiciona se a gente já não passou dele (ex: se for 69.6, não volta pro 69.5)
-    const atualMeio = baseInteira + 0.5;
-    if (atualMeio > capituloAtual) {
-        candidatos.push(atualMeio);
-    }
-
-    // 3. Tenta o próximo inteiro (ex: 69.1 -> 70)
-    const proximoInteiro = baseInteira + 1;
+    const proximoInteiro = baseInteira + 1; // 70
     candidatos.push(proximoInteiro);
+    candidatos.push(fix(proximoInteiro + 0.1)); // 70.1
 
-    // 4. Tenta o primeiro decimal do PRÓXIMO inteiro (ex: 69.1 -> 70.1)
-    // Isso cobre o caso onde a obra pula de uma temporada para outra ou decimal direto
-    candidatos.push(fix(proximoInteiro + 0.1));
-
-    // Remove duplicatas e ordena
-    // Exemplo final para 69.1: [69.2, 69.5, 70, 70.1]
     return [...new Set(candidatos)].sort((a, b) => a - b);
 }
+
 // --- FUNÇÃO 1: O VIGIA (Sakura) ---
 export async function verificarSeSaiuNoSakura(urlBaseSakura: string, ultimoCapitulo: number): Promise<{ saiu: boolean, numero: number, novaUrl: string }> {
-    
-    // Gera lista de possibilidades: ex: 8 -> [8.1, 8.5, 9] | 8.2 -> [8.3, 8.5, 9]
     const listaDeTestes = gerarCandidatos(ultimoCapitulo);
     const sessionID = `sakura_${Date.now()}`;
 
     try {
-        // Itera sobre os candidatos em ordem. O primeiro que achar, retorna.
         for (const proximoNumero of listaDeTestes) {
-            
-            // FORMATAÇÃO DE URL: Sakura usa traço para decimais (ex: 69.1 -> 69-1)
-            // Se for inteiro (69), fica 69.
+            // Sakura usa traço para decimais na URL (ex: 69-1)
             const numeroFormatadoURL = proximoNumero.toString().replace('.', '-');
-
-            // Monta a URL removendo o número antigo e pondo o novo
-            // O regex busca o último segmento numérico (com ou sem traços)
+            
             let urlParaTestar = "";
             const match = urlBaseSakura.match(/(\d+(?:[-]\d+)?)\/?$/);
             
             if (match) {
-                // Substitui "69-1" ou "69" pelo novo número formatado
                 urlParaTestar = urlBaseSakura.replace(match[1], numeroFormatadoURL);
             } else {
-                // Fallback: adiciona no final
                 urlParaTestar = `${urlBaseSakura.replace(/\/+$/, "")}/${numeroFormatadoURL}/`;
             }
-
-            // Otimização: Log simples
-            // console.log(`[Sakura] Testando Cap ${proximoNumero} (URL: ...${urlParaTestar.slice(-10)})`);
 
             const html = await requestFlaresolverr(urlParaTestar, sessionID);
 
             if (html) {
                 const $ = cheerio.load(html);
                 const title = $('title').text().trim();
-
-                // Regex flexível: aceita "Capítulo 69.1", "Cap 69-1", "69.1", etc.
-                // Escapamos o ponto para o regex entender que é literal
+                
+                // Regex flexível para o título da página (ponto, vírgula ou traço)
                 const numRegex = proximoNumero.toString().replace('.', '[.,-]');
                 const regexTitle = new RegExp(`(?:Cap|Capítulo|Ch|Chapter).*?${numRegex}`, 'i');
 
-                // Verificação extra: O título deve conter o número, E não ser página de erro 404 genérica
                 if (regexTitle.test(title) && !title.includes("Página não encontrada")) {
                     return { saiu: true, numero: proximoNumero, novaUrl: urlParaTestar };
                 }
             }
-            // Se não achou este candidato, o loop continua para o próximo (ex: testou 8.1, falhou -> testa 8.5...)
         }
-
     } catch (e) {
-        console.error(`[Sakura] Erro ao verificar: ${e}`);
+        console.error(`[Sakura] Erro: ${e}`);
     } finally {
         destroySession(sessionID);
     }
@@ -121,16 +93,19 @@ export async function buscarLinkNaObra(urlPaginaObra: string, capituloAlvo: numb
         $('a').each((_, el) => {
             if (linkEncontrado) return false;
 
-            const textoLink = $(el).text().trim().toLowerCase();
+            const textoLink = $(el).text().trim().replace(/\s+/g, ' '); // Remove espaços duplos
             const href = $(el).attr('href');
             if (!href) return;
 
-            // Regex para achar "Chapter 8.5" ou "Ch. 8.5"
-            // O replace garante que 8.5 seja lido no regex como 8\.5
-            const numString = capituloAlvo.toString().replace('.', '\\.');
-            const regexCapitulo = new RegExp(`(?:^|\\s|ch\\.?|chapter)\\s*${numString}(?:\\s|:|$)`, 'i');
+            // --- CORREÇÃO DO REGEX AQUI ---
+            // Transforma "69.1" em "69[.,-]1" para aceitar "Ch. 69.1", "Ch. 69-1" ou "Ch. 69,1"
+            const numString = capituloAlvo.toString().replace('.', '[.,-]');
+            
+            // Regex procura: (Inicio ou espaço ou 'ch') + (numero) + (espaço ou dois pontos ou fim)
+            const regexCapitulo = new RegExp(`(?:^|\\s|ch\\.?|chapter|vol\\.?\\s*\\d+)\\s*${numString}(?:\\s|:|$)`, 'i');
 
             if (regexCapitulo.test(textoLink)) {
+                // Achou o link!
                 if (href.startsWith('http')) {
                     linkEncontrado = href;
                 } else {
@@ -138,14 +113,29 @@ export async function buscarLinkNaObra(urlPaginaObra: string, capituloAlvo: numb
                     linkEncontrado = urlBase + href;
                 }
 
-                // Tenta pegar o título (lógica visual do site)
-                let rawText = $(el).find('span.opacity-50').text().trim(); // MangaPark novo
-                if (!rawText) rawText = $(el).text().replace(regexCapitulo, '').trim();
+                // --- TENTATIVA DE EXTRAIR TÍTULO ---
+                // 1. Tenta pegar de elementos específicos do MangaPark (span de título)
+                let rawText = $(el).find('span.opacity-50').text().trim(); // Layout novo v3
+                if (!rawText) rawText = $(el).find('div.text-sm').text().trim(); // Layout v5/alternativo
                 
-                const tituloLimpo = rawText.replace(/^[:\s\-"\.]+/, '').replace(/["-]+$/, '').trim();
-                if (tituloLimpo.length > 2) tituloEncontrado = tituloLimpo;
+                // 2. Se não achou em tags especificas, tenta limpar o texto do link
+                if (!rawText) {
+                    // Remove "Chapter 69.1" do texto "Chapter 69.1: The Battle"
+                    rawText = textoLink.replace(regexCapitulo, '').trim();
+                }
 
-                return false; 
+                // 3. Limpeza final de pontuação
+                const tituloLimpo = rawText
+                    .replace(/^[:\s\-"\.]+|[:\s\-"\.]+$/g, '') // Remove : - . do começo e fim
+                    .trim();
+
+                // Só salva se sobrou algo relevante (mais de 2 letras)
+                // Isso evita salvar coisas como "NEW" ou "UP" como título
+                if (tituloLimpo.length > 2 && !/^(new|up|hot)$/i.test(tituloLimpo)) {
+                    tituloEncontrado = tituloLimpo;
+                }
+
+                return false; // Break loop
             }
         });
 
