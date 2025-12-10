@@ -21,25 +21,32 @@ export async function wakeUpRender(): Promise<void> {
 function gerarCandidatos(capituloAtual: number): number[] {
     const candidatos: number[] = [];
     
-    // Arredonda para evitar erros de ponto flutuante (ex: 8.1 + 0.1 = 8.2000004)
+    // Função auxiliar para evitar "8.2000004"
     const fix = (n: number) => parseFloat(n.toFixed(1));
+    const baseInteira = Math.floor(capituloAtual);
 
-    // 1. Tenta o próximo decimal direto (.1)
+    // 1. Tenta o próximo decimal direto (ex: 69.1 -> 69.2)
     candidatos.push(fix(capituloAtual + 0.1));
 
-    // 2. Tenta o .5 (se já não tiver passado dele ou se não for o passo anterior)
-    const proximoMeio = Math.floor(capituloAtual) + 0.5;
-    if (proximoMeio > capituloAtual) {
-        candidatos.push(proximoMeio);
+    // 2. Tenta o .5 da série atual (ex: 69.2 -> 69.5)
+    // Só adiciona se a gente já não passou dele (ex: se for 69.6, não volta pro 69.5)
+    const atualMeio = baseInteira + 0.5;
+    if (atualMeio > capituloAtual) {
+        candidatos.push(atualMeio);
     }
 
-    // 3. Tenta o próximo inteiro
-    candidatos.push(Math.floor(capituloAtual) + 1);
+    // 3. Tenta o próximo inteiro (ex: 69.1 -> 70)
+    const proximoInteiro = baseInteira + 1;
+    candidatos.push(proximoInteiro);
 
-    // Remove duplicatas e ordena (ex: se estiver no 8.4, o +0.1 é 8.5, que é igual ao proximoMeio)
+    // 4. Tenta o primeiro decimal do PRÓXIMO inteiro (ex: 69.1 -> 70.1)
+    // Isso cobre o caso onde a obra pula de uma temporada para outra ou decimal direto
+    candidatos.push(fix(proximoInteiro + 0.1));
+
+    // Remove duplicatas e ordena
+    // Exemplo final para 69.1: [69.2, 69.5, 70, 70.1]
     return [...new Set(candidatos)].sort((a, b) => a - b);
 }
-
 // --- FUNÇÃO 1: O VIGIA (Sakura) ---
 export async function verificarSeSaiuNoSakura(urlBaseSakura: string, ultimoCapitulo: number): Promise<{ saiu: boolean, numero: number, novaUrl: string }> {
     
