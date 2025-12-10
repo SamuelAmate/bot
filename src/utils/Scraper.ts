@@ -1,12 +1,9 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 
-// Pega a URL do ambiente ou usa o padrão. 
-// O replace remove a barra no final se houver, e adiciona /v1
 const BASE_URL = process.env.FLARESOLVERR_URL || 'http://localhost:8191';
 const FLARESOLVERR_API = `${BASE_URL.replace(/\/$/, '')}/v1`;
 
-// --- NOVA FUNÇÃO: WAKE UP ---
 export async function wakeUpRender(): Promise<void> {
     console.log(" [System] Verificando conexão com FlareSolverr em: " + FLARESOLVERR_API);
     try {
@@ -14,48 +11,87 @@ export async function wakeUpRender(): Promise<void> {
             cmd: 'sessions.list',
             maxTimeout: 10000 
         });
-        
-        if (res.data.status === 'ok') {
-            console.log("[System] Flaresolverr está online e pronto!");
-        } else {
-            console.warn("[System] Flaresolverr respondeu, mas com status estranho.");
-        }
+        if (res.data.status === 'ok') console.log("[System] Flaresolverr está online e pronto!");
     } catch (error) {
-        console.error("[System] Falha ao conectar no Flaresolverr. O scraper pode falhar.");
+        console.error("[System] Falha ao conectar no Flaresolverr.");
     }
+}
+
+// --- LÓGICA DE CAPÍTULOS DECIMAIS ---
+function gerarCandidatos(capituloAtual: number): number[] {
+    const candidatos: number[] = [];
+    
+    // Arredonda para evitar erros de ponto flutuante (ex: 8.1 + 0.1 = 8.2000004)
+    const fix = (n: number) => parseFloat(n.toFixed(1));
+
+    // 1. Tenta o próximo decimal direto (.1)
+    candidatos.push(fix(capituloAtual + 0.1));
+
+    // 2. Tenta o .5 (se já não tiver passado dele ou se não for o passo anterior)
+    const proximoMeio = Math.floor(capituloAtual) + 0.5;
+    if (proximoMeio > capituloAtual) {
+        candidatos.push(proximoMeio);
+    }
+
+    // 3. Tenta o próximo inteiro
+    candidatos.push(Math.floor(capituloAtual) + 1);
+
+    // Remove duplicatas e ordena (ex: se estiver no 8.4, o +0.1 é 8.5, que é igual ao proximoMeio)
+    return [...new Set(candidatos)].sort((a, b) => a - b);
 }
 
 // --- FUNÇÃO 1: O VIGIA (Sakura) ---
 export async function verificarSeSaiuNoSakura(urlBaseSakura: string, ultimoCapitulo: number): Promise<{ saiu: boolean, numero: number, novaUrl: string }> {
-    const proximoNumero = ultimoCapitulo + 1;
     
-    // Tenta adivinhar a URL do próximo capítulo
-    let urlParaTestar = "";
-    const match = urlBaseSakura.match(/(\d+)\/?$/);
-    if (match) {
-        urlParaTestar = urlBaseSakura.replace(match[1], proximoNumero.toString());
-    } else {
-        urlParaTestar = `${urlBaseSakura.replace(/\/+$/, "")}/${proximoNumero}/`;
-    }
-
+    // Gera lista de possibilidades: ex: 8 -> [8.1, 8.5, 9] | 8.2 -> [8.3, 8.5, 9]
+    const listaDeTestes = gerarCandidatos(ultimoCapitulo);
     const sessionID = `sakura_${Date.now()}`;
 
     try {
-        console.log(`[Sakura] Monitorando cap ${proximoNumero}...`);
-        const html = await requestFlaresolverr(urlParaTestar, sessionID);
-        
-        if (!html) return { saiu: false, numero: ultimoCapitulo, novaUrl: urlBaseSakura };
+        // Itera sobre os candidatos em ordem. O primeiro que achar, retorna.
+        for (const proximoNumero of listaDeTestes) {
+            
+            // FORMATAÇÃO DE URL: Sakura usa traço para decimais (ex: 69.1 -> 69-1)
+            // Se for inteiro (69), fica 69.
+            const numeroFormatadoURL = proximoNumero.toString().replace('.', '-');
 
-        const $ = cheerio.load(html);
-        const title = $('title').text().trim();
+            // Monta a URL removendo o número antigo e pondo o novo
+            // O regex busca o último segmento numérico (com ou sem traços)
+            let urlParaTestar = "";
+            const match = urlBaseSakura.match(/(\d+(?:[-]\d+)?)\/?$/);
+            
+            if (match) {
+                // Substitui "69-1" ou "69" pelo novo número formatado
+                urlParaTestar = urlBaseSakura.replace(match[1], numeroFormatadoURL);
+            } else {
+                // Fallback: adiciona no final
+                urlParaTestar = `${urlBaseSakura.replace(/\/+$/, "")}/${numeroFormatadoURL}/`;
+            }
 
-        const regex = new RegExp(`Cap(\\.|ítulo)?\\s*${proximoNumero}`, 'i');
-        
-        if (regex.test(title)) {
-            return { saiu: true, numero: proximoNumero, novaUrl: urlParaTestar };
+            // Otimização: Log simples
+            // console.log(`[Sakura] Testando Cap ${proximoNumero} (URL: ...${urlParaTestar.slice(-10)})`);
+
+            const html = await requestFlaresolverr(urlParaTestar, sessionID);
+
+            if (html) {
+                const $ = cheerio.load(html);
+                const title = $('title').text().trim();
+
+                // Regex flexível: aceita "Capítulo 69.1", "Cap 69-1", "69.1", etc.
+                // Escapamos o ponto para o regex entender que é literal
+                const numRegex = proximoNumero.toString().replace('.', '[.,-]');
+                const regexTitle = new RegExp(`(?:Cap|Capítulo|Ch|Chapter).*?${numRegex}`, 'i');
+
+                // Verificação extra: O título deve conter o número, E não ser página de erro 404 genérica
+                if (regexTitle.test(title) && !title.includes("Página não encontrada")) {
+                    return { saiu: true, numero: proximoNumero, novaUrl: urlParaTestar };
+                }
+            }
+            // Se não achou este candidato, o loop continua para o próximo (ex: testou 8.1, falhou -> testa 8.5...)
         }
+
     } catch (e) {
-        // Erro silencioso
+        console.error(`[Sakura] Erro ao verificar: ${e}`);
     } finally {
         destroySession(sessionID);
     }
@@ -68,8 +104,6 @@ export async function buscarLinkNaObra(urlPaginaObra: string, capituloAlvo: numb
     const sessionID = `busca_mp_${Date.now()}`;
 
     try {
-        console.log(`[MangaPark] Entrando na página da obra para achar o Cap ${capituloAlvo}...`);
-        
         const html = await requestFlaresolverr(urlPaginaObra, sessionID);
         if (!html) return { link: urlPaginaObra, titulo: null };
 
@@ -82,13 +116,14 @@ export async function buscarLinkNaObra(urlPaginaObra: string, capituloAlvo: numb
 
             const textoLink = $(el).text().trim().toLowerCase();
             const href = $(el).attr('href');
-
             if (!href) return;
 
-            const regexCapitulo = new RegExp(`(?:^|\\s|ch\\.?|chapter)\\s*${capituloAlvo}(?:\\s|:|$)`, 'i');
+            // Regex para achar "Chapter 8.5" ou "Ch. 8.5"
+            // O replace garante que 8.5 seja lido no regex como 8\.5
+            const numString = capituloAlvo.toString().replace('.', '\\.');
+            const regexCapitulo = new RegExp(`(?:^|\\s|ch\\.?|chapter)\\s*${numString}(?:\\s|:|$)`, 'i');
 
             if (regexCapitulo.test(textoLink)) {
-                // 1. Montagem do Link
                 if (href.startsWith('http')) {
                     linkEncontrado = href;
                 } else {
@@ -96,40 +131,20 @@ export async function buscarLinkNaObra(urlPaginaObra: string, capituloAlvo: numb
                     linkEncontrado = urlBase + href;
                 }
 
-                // 2. Caça ao Título
-                let rawText = $(el).find('span.opacity-50').text().trim();
+                // Tenta pegar o título (lógica visual do site)
+                let rawText = $(el).find('span.opacity-50').text().trim(); // MangaPark novo
+                if (!rawText) rawText = $(el).text().replace(regexCapitulo, '').trim();
                 
-                if (!rawText) {
-                    rawText = $(el).text().replace(regexCapitulo, '').trim();
-                }
+                const tituloLimpo = rawText.replace(/^[:\s\-"\.]+/, '').replace(/["-]+$/, '').trim();
+                if (tituloLimpo.length > 2) tituloEncontrado = tituloLimpo;
 
-                if (!rawText || rawText.length < 3) {
-                    const vizinho = $(el).next('span');
-                    if (vizinho.length > 0) {
-                        rawText = vizinho.text().trim();
-                    }
-                }
-                
-                // 3. Limpeza
-                const tituloLimpo = rawText
-                    .replace(/^[:\s\-"\.]+/, '')
-                    .replace(/["-]+$/, '')
-                    .trim();
-
-                if (tituloLimpo.length > 2) {
-                    tituloEncontrado = tituloLimpo;
-                }
-
-                console.log(`[Debug] Título Bruto: "${rawText}" | Final: "${tituloEncontrado}"`);
                 return false; 
             }
         });
 
         if (linkEncontrado) {
-            console.log(`[MangaPark] Link: ${linkEncontrado} | Título: ${tituloEncontrado || "Sem título"}`);
             return { link: linkEncontrado, titulo: tituloEncontrado };
         } else {
-            console.log(`[MangaPark] Link específico não achado.`);
             return { link: urlPaginaObra, titulo: null };
         }
 
@@ -141,12 +156,11 @@ export async function buscarLinkNaObra(urlPaginaObra: string, capituloAlvo: numb
     }
 }
 
-// Helpers (FlareSolverr)
+// Helpers
 async function requestFlaresolverr(url: string, session: string) {
     try {
-        // Agora usa a constante corrigida FLARESOLVERR_API
         const res = await axios.post(FLARESOLVERR_API, {
-            cmd: 'request.get', url, maxTimeout: 60000, session // Aumentei timeout para 60s
+            cmd: 'request.get', url, maxTimeout: 60000, session 
         });
         if (res.data.status === 'ok') return res.data.solution.response;
     } catch (e) { return null; }
