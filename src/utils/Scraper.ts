@@ -11,26 +11,33 @@ export async function wakeUpRender(): Promise<void> {
             cmd: 'sessions.list',
             maxTimeout: 10000 
         });
-        if (res.data.status === 'ok') console.log("[System] Flaresolverr está online e pronto!");
+        if (res.data.status === 'ok') {
+             console.log("[System] Flaresolverr está online e pronto!");
+        }
     } catch (error) {
         console.error("[System] Falha ao conectar no Flaresolverr.");
     }
 }
 
-// --- LÓGICA DE CAPÍTULOS (COM DECIMAIS) ---
+// --- LÓGICA DE CAPÍTULOS (Decimais + Inteiros) ---
 function gerarCandidatos(capituloAtual: number): number[] {
     const candidatos: number[] = [];
     const fix = (n: number) => parseFloat(n.toFixed(1));
     const baseInteira = Math.floor(capituloAtual);
 
-    candidatos.push(fix(capituloAtual + 0.1)); // 69.1 -> 69.2
+    // 1. O próximo decimal (69.1 -> 69.2)
+    candidatos.push(fix(capituloAtual + 0.1));
     
-    const atualMeio = baseInteira + 0.5; // 69.5
+    // 2. O meio (69.5) - só se ainda não passou
+    const atualMeio = baseInteira + 0.5;
     if (atualMeio > capituloAtual) candidatos.push(atualMeio);
 
-    const proximoInteiro = baseInteira + 1; // 70
+    // 3. O próximo inteiro (70)
+    const proximoInteiro = baseInteira + 1;
     candidatos.push(proximoInteiro);
-    candidatos.push(fix(proximoInteiro + 0.1)); // 70.1
+
+    // 4. O decimal do próximo inteiro (70.1)
+    candidatos.push(fix(proximoInteiro + 0.1));
 
     return [...new Set(candidatos)].sort((a, b) => a - b);
 }
@@ -60,7 +67,7 @@ export async function verificarSeSaiuNoSakura(urlBaseSakura: string, ultimoCapit
                 const $ = cheerio.load(html);
                 const title = $('title').text().trim();
                 
-                // Regex flexível para o título da página (ponto, vírgula ou traço)
+                // Regex flexível no título da página
                 const numRegex = proximoNumero.toString().replace('.', '[.,-]');
                 const regexTitle = new RegExp(`(?:Cap|Capítulo|Ch|Chapter).*?${numRegex}`, 'i');
 
@@ -93,19 +100,17 @@ export async function buscarLinkNaObra(urlPaginaObra: string, capituloAlvo: numb
         $('a').each((_, el) => {
             if (linkEncontrado) return false;
 
-            const textoLink = $(el).text().trim().replace(/\s+/g, ' '); // Remove espaços duplos
+            const textoLink = $(el).text().trim().toLowerCase();
             const href = $(el).attr('href');
             if (!href) return;
 
-            // --- CORREÇÃO DO REGEX AQUI ---
-            // Transforma "69.1" em "69[.,-]1" para aceitar "Ch. 69.1", "Ch. 69-1" ou "Ch. 69,1"
+            // --- REGEX HÍBRIDO ---
+            // Aceita decimais (ponto/traço) E estrutura de texto
             const numString = capituloAlvo.toString().replace('.', '[.,-]');
-            
-            // Regex procura: (Inicio ou espaço ou 'ch') + (numero) + (espaço ou dois pontos ou fim)
             const regexCapitulo = new RegExp(`(?:^|\\s|ch\\.?|chapter|vol\\.?\\s*\\d+)\\s*${numString}(?:\\s|:|$)`, 'i');
 
             if (regexCapitulo.test(textoLink)) {
-                // Achou o link!
+                // 1. Salva o Link
                 if (href.startsWith('http')) {
                     linkEncontrado = href;
                 } else {
@@ -113,33 +118,44 @@ export async function buscarLinkNaObra(urlPaginaObra: string, capituloAlvo: numb
                     linkEncontrado = urlBase + href;
                 }
 
-                // --- TENTATIVA DE EXTRAIR TÍTULO ---
-                // 1. Tenta pegar de elementos específicos do MangaPark (span de título)
-                let rawText = $(el).find('span.opacity-50').text().trim(); // Layout novo v3
-                if (!rawText) rawText = $(el).find('div.text-sm').text().trim(); // Layout v5/alternativo
+                // --- ESTRATÉGIA DE TÍTULO (Restaurada do código antigo) ---
                 
-                // 2. Se não achou em tags especificas, tenta limpar o texto do link
+                // Tática 1: Elementos internos específicos (MangaPark novo)
+                let rawText = $(el).find('span.opacity-50').text().trim(); 
+                
+                // Tática 2: VIZINHO (Crucial - estava faltando)
+                // Procura um <span> logo após o <a>
                 if (!rawText) {
-                    // Remove "Chapter 69.1" do texto "Chapter 69.1: The Battle"
-                    rawText = textoLink.replace(regexCapitulo, '').trim();
+                    const vizinho = $(el).next('span');
+                    if (vizinho.length > 0) {
+                        rawText = vizinho.text().trim();
+                    }
                 }
 
-                // 3. Limpeza final de pontuação
+                // Tática 3: Limpeza do próprio texto do link
+                if (!rawText) {
+                    // Remove "Chapter 69" do texto, sobrando o título
+                    // RegexCaseInsensitive para replace
+                    const regexReplace = new RegExp(`(?:^|\\s|ch\\.?|chapter|vol\\.?\\s*\\d+)\\s*${numString}(?:\\s|:|$)`, 'gi');
+                    rawText = $(el).text().replace(regexReplace, '').trim();
+                }
+
+                // Limpeza final de pontuação
                 const tituloLimpo = rawText
-                    .replace(/^[:\s\-"\.]+|[:\s\-"\.]+$/g, '') // Remove : - . do começo e fim
+                    .replace(/^[:\s\-"\.]+|[:\s\-"\.]+$/g, '') 
                     .trim();
 
-                // Só salva se sobrou algo relevante (mais de 2 letras)
-                // Isso evita salvar coisas como "NEW" ou "UP" como título
-                if (tituloLimpo.length > 2 && !/^(new|up|hot)$/i.test(tituloLimpo)) {
+                // Validação para não pegar lixo como "NEW" ou datas
+                if (tituloLimpo.length > 2 && !/^(new|up|hot|\d{1,2}\/\d{1,2})$/i.test(tituloLimpo)) {
                     tituloEncontrado = tituloLimpo;
                 }
-
-                return false; // Break loop
+                
+                return false; // Encontrou, para o loop
             }
         });
 
         if (linkEncontrado) {
+            console.log(`[Scraper] Link: ${linkEncontrado} | Título: ${tituloEncontrado}`);
             return { link: linkEncontrado, titulo: tituloEncontrado };
         } else {
             return { link: urlPaginaObra, titulo: null };
