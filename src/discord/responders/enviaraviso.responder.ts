@@ -83,8 +83,8 @@ createResponder({
                 try {
                     await axios.post(FLARESOLVERR_API, { cmd: 'sessions.create', session: sessionID });
 
-                    for (let tentativa = 1; tentativa <= 5; tentativa++) {
-                        console.log(`[DEBUG] Tentativa ${tentativa}/5 buscando site...`);
+                    for (let tentativa = 1; tentativa <= 10; tentativa++) {
+                        console.log(`[DEBUG] Tentativa ${tentativa}/10 buscando site...`);
                         try {
                             const response = await axios.post(FLARESOLVERR_API, {
                                 cmd: 'request.get',
@@ -103,7 +103,7 @@ createResponder({
                         } catch (reqErr) {
                             console.warn(`[DEBUG] Erro na requisição: ${(reqErr as Error).message}`);
                         }
-                        if (tentativa < 5) await new Promise(r => setTimeout(r, 3000));
+                        if (tentativa < 10) await new Promise(r => setTimeout(r, 3000));
                     }
 
                     if (!sucessoScraping) {
@@ -150,6 +150,8 @@ createResponder({
 
                 } catch (err) {
                     console.error("[DEBUG] ERRO NO PROCESSO DE SCRAPING:", err);
+                    await interaction.followUp({ content: "❌ Erro ao procurar cargos no Sandwiche, por favor tente novamente" });
+                    return; 
                 } finally {
                     await axios.post(FLARESOLVERR_API, { cmd: 'sessions.destroy', session: sessionID }).catch(() => {});
                 }
