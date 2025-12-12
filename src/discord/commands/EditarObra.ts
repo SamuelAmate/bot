@@ -1,6 +1,6 @@
 import { createCommand } from "#base";
 import { createFileUpload, createLabel, createModalFields, createTextInput } from "@magicyan/discord";
-import { ApplicationCommandOptionType, ApplicationCommandType, TextInputStyle, PermissionFlagsBits } from "discord.js";
+import { ApplicationCommandOptionType, ApplicationCommandType, ChannelSelectMenuBuilder, ChannelType, PermissionFlagsBits, TextInputStyle } from "discord.js";
 
 import { getMangas } from '../../utils/StateManager.js';
 
@@ -83,7 +83,19 @@ createCommand({
                             required: true,
                             value: manga.titulo
                         })
-                    )
+                    ),
+                    createLabel(
+                            "Canal",
+                            "Selecione onde a mensagem será enviada",
+                            new ChannelSelectMenuBuilder({
+                            customId: "canal",
+                            required: true,
+                            channelTypes: [
+                            ChannelType.GuildText,
+                            ChannelType.GuildAnnouncement
+                                    ]
+                                })                
+                            )
                 )
             });
             console.log("[CMD] Modal aberto com sucesso!");

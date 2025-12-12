@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
 import { pipeline } from 'stream/promises';
+import { SendableChannels } from "discord.js";
 
 const IMAGE_DIR = path.resolve(process.cwd(), 'imagens');
 
@@ -22,6 +23,14 @@ createResponder({
             const tituloObraOriginal = fields.getTextInputValue("titulo_referencia");
             const imagens = fields.getUploadedFiles("imagem"); 
             const imagemAnexada = imagens?.first(); 
+
+            const canaisSelecionados = fields.getSelectedChannels("canal");
+            const canalDestino = canaisSelecionados ? canaisSelecionados.first() as SendableChannels : null;
+            
+            if (!canalDestino) {
+                await interaction.editReply({ content: "❌ Canal inválido." });
+                return;
+            }
 
             // --- CORREÇÃO REGEX (Suporta decimais e traços) ---
             const match = novaUrlCompleta.match(/(\d+(?:[-.]\d+)?)\/?$/); 
@@ -68,7 +77,8 @@ createResponder({
                 urlBase: novaUrlBase,
                 lastChapter: novoCap, 
                 mensagemPadrao: novaMensagem || undefined,
-                imagem: caminhoImagemFinal 
+                imagem: caminhoImagemFinal ,
+                channelId: canalDestino.id,
             };
             
             addManga(updatedManga);

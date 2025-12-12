@@ -18,7 +18,7 @@ export async function monitorMangas(bot: Client): Promise<void> {
                 const novoCapitulo = statusSakura.numero;
                 const novaURLSakura = statusSakura.novaUrl;
                 
-                console.log(`[Monitor] 🌸 Novo capítulo detectado no Sakura: ${manga.titulo} - Cap ${novoCapitulo}`);
+                console.log(`[Monitor] Novo capítulo detectado no Sakura: ${manga.titulo} - Cap ${novoCapitulo}`);
 
                 // 1. ATUALIZA O BANCO IMEDIATAMENTE 
                 // Isso impede que o Cron pegue esse mesmo capítulo daqui a 10 min
