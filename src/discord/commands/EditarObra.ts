@@ -85,16 +85,18 @@ createCommand({
                         })
                     ),
                     createLabel(
-                        "Canal",
-                        "Selecione onde a mensagem será enviada",
-                        new ChannelSelectMenuBuilder()
-                            .setCustomId("canal")
-                            .setPlaceholder("Selecione um canal (Deixe vazio para manter o atual)")
-                            .setChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
-                            .setMinValues(0) // Isso torna o campo opcional (0 seleções permitidas)
-                            .setMaxValues(1) // Máximo de 1 canal
-                            .setDefaultChannels([manga.channelId]) // Tenta pré-selecionar
-                    )
+                            "Canal",
+                            "Selecione onde a mensagem será enviada",
+                            new ChannelSelectMenuBuilder({
+                            customId: "canal",
+                            required: true,
+                            channelTypes: [
+                            ChannelType.GuildText,
+                            ChannelType.GuildAnnouncement
+                                    ]
+                                })     
+                                .setDefaultChannels([manga.channelId])           
+                            )
                 )
             });
             console.log("[CMD] Modal aberto com sucesso!");
