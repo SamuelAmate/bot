@@ -227,7 +227,7 @@ async function enviarMensagemFinal(
     ehLinkGenerico: boolean
 ): Promise<Message | null> {
     
-    let mensagemFinal = manga.mensagemPadrao || "O **capítulo {capitulo}** de @{titulo}, **\"{nome_capitulo}\"** já está disponível.\n\n*aproveitem e boa leitura.*";
+    let mensagemFinal = manga.mensagemPadrao || "O **capítulo {capitulo}** de @{titulo}, **\"{nome_capitulo}\",** já está disponível.\n\n*Aproveitem e boa leitura!*";
 
     const temTituloReal = tituloCapitulo && tituloCapitulo.trim() !== "" && !/^cap[íi]tulo\s*\d+$/i.test(tituloCapitulo);
 
