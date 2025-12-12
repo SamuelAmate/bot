@@ -195,7 +195,7 @@ function construirBotoes(linkSakura: string, linkMP: string, linkMangataro?: str
     const isGenericSakura = !/\d+(-?\d+)?\/?$/.test(linkSakura); 
     buttons.push(
         new ButtonBuilder()
-            .setLabel(isGenericSakura ? 'Sakura (Obra)' : 'Ler no Sakura')
+            .setLabel(isGenericSakura ? 'Ler no Sakura' : 'Ler no Sakura')
             .setEmoji('🌸')
             .setStyle(ButtonStyle.Link)
             .setURL(linkSakura)
@@ -204,7 +204,7 @@ function construirBotoes(linkSakura: string, linkMP: string, linkMangataro?: str
     if (linkMP && linkMP.startsWith('http')) {
         const isGenericMP = !linkMP.includes('chapter') && !linkMP.includes('ch.') && !/\d$/.test(linkMP);
         const emoji = isGenericMP ? '🏠' : '🎢'; 
-        const label = isGenericMP ? 'MangaPark (Obra)' : 'Ler no Mangapark';
+        const label = isGenericMP ? 'Ler no Mangapark' : 'Ler no Mangapark';
 
         buttons.push(new ButtonBuilder().setLabel(label).setEmoji(emoji).setStyle(ButtonStyle.Link).setURL(linkMP));
     }
