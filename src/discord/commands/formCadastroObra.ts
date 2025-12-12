@@ -37,7 +37,7 @@ createCommand({
                         customId: "mensagem",
                         required: true,
                         style: TextInputStyle.Paragraph,
-                        value: "O **capítulo {capitulo}** de @{titulo}, **\"{nome_capitulo}\"**, já está disponível.\n\n*Aproveitem e boa leitura!*\n\n"
+                        value: "O **capítulo {capitulo}** de @{titulo}, **\"{nome_capitulo}\",** já está disponível.\n\n*Aproveitem e boa leitura!*\n\n"
                     })
                 ),
                 createLabel(
