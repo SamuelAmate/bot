@@ -84,7 +84,7 @@ createResponder({
             addManga(updatedManga);
 
             await interaction.editReply({
-                content: `✅ **${mangaOriginal.titulo}** editada!\n**Monitorando:** Capítulo ${novoCap}`
+                content: `✅ **${mangaOriginal.titulo}** editada!\n**Monitorando a partir do:** Capítulo ${novoCap}`
             });
 
         } catch (error) {
