@@ -1,10 +1,10 @@
 import { createResponder, ResponderType } from "#base";
+import axios from 'axios';
 import { SendableChannels } from "discord.js";
-import { addManga, MangaEntry } from '../../utils/StateManager.js';
 import fs from 'fs';
 import path from 'path';
-import axios from 'axios';
 import { pipeline } from 'stream/promises';
+import { addManga, MangaEntry } from '../../utils/StateManager.js';
 
 const IMAGE_DIR = path.resolve(process.cwd(), 'imagens');
 if (!fs.existsSync(IMAGE_DIR)) fs.mkdirSync(IMAGE_DIR, { recursive: true });
@@ -98,7 +98,7 @@ createResponder({
             addManga(newEntry);
             
             await interaction.editReply({
-                content: `✅ **${titulo}** cadastrado!\n**Monitorando a partir do:** Capítulo ${ultimoCap}`
+                content: `✅ **${titulo}** cadastrado!\n**Monitorando a partir do:** Capítulo ${ultimoCap}\n**Canal:** <#${canalDestino.id}>`
             });
 
         } catch (err) {

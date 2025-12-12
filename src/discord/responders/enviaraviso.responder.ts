@@ -103,7 +103,7 @@ createResponder({
                         } catch (reqErr) {
                             console.warn(`[DEBUG] Erro na requisição: ${(reqErr as Error).message}`);
                         }
-                        if (tentativa < 3) await new Promise(r => setTimeout(r, 3000));
+                        if (tentativa < 5) await new Promise(r => setTimeout(r, 3000));
                     }
 
                     if (!sucessoScraping) {
