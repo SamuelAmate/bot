@@ -1,139 +1,214 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, Client, TextChannel, Message } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, Client, EmbedBuilder, Message, TextChannel } from 'discord.js';
 import fs from 'fs';
-import { buscarLinkNaObra, verificarSeSaiuNoSakura } from '../utils/Scraper.js';
+import { buscarLinkNaObra, verificarSeSaiuNoMangaPark, verificarSeSaiuNoSakura } from '../utils/Scraper.js';
 import { addManga, getMangas, limparDuplicatas, MangaEntry } from '../utils/StateManager.js';
 
-// Utilitário para pausa (Promisified Timeout)
+// Utilitário para pausa
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// --- CONFIGURAÇÃO DE PARALELISMO ---
+// Quantas obras verificar SIMULTANEAMENTE. 
+// 3 é seguro. 5 se tiver um PC bom. Mais que isso arrisca travar.
+const CONCURRENCY_LIMIT = 3; 
 
 export async function monitorMangas(bot: Client): Promise<void> {
     limparDuplicatas();
     const mangas = getMangas();
+    
+    console.log(`[Monitor] Iniciando ciclo para ${mangas.length} obras (Lotes de ${CONCURRENCY_LIMIT})...`);
 
-    for (const manga of mangas) {
-        try {
-            const statusSakura = await verificarSeSaiuNoSakura(manga.urlBase, manga.lastChapter);
+    // Loop para processar em lotes (Chunks)
+    for (let i = 0; i < mangas.length; i += CONCURRENCY_LIMIT) {
+        const lote = mangas.slice(i, i + CONCURRENCY_LIMIT);
+        console.log(`[Monitor] 🔄 Processando lote ${Math.floor(i / CONCURRENCY_LIMIT) + 1}...`);
 
-            if (statusSakura.saiu) {
-                const novoCapitulo = statusSakura.numero;
-                const novaURLSakura = statusSakura.novaUrl;
-                
-                console.log(`[Monitor] Novo capítulo detectado no Sakura: ${manga.titulo} - Cap ${novoCapitulo}`);
+        // Promise.all faz o array de promessas rodar ao mesmo tempo e espera todas acabarem
+        await Promise.all(lote.map(manga => processarMangaUnico(bot, manga)));
+    }
 
-                // 1. ATUALIZA O BANCO IMEDIATAMENTE 
-                // Isso impede que o Cron pegue esse mesmo capítulo daqui a 10 min
-                const updatedManga: MangaEntry = {
-                    ...manga,
-                    lastChapter: novoCapitulo,
-                    urlBase: novaURLSakura
-                };
-                addManga(updatedManga);
+    console.log(`[Monitor] ✅ Ciclo de verificação finalizado.`);
+}
 
-                // 2. INICIA O PROCESSO DE BUSCA/ENVIO (Assíncrono)
-                // Não usamos 'await' aqui para não travar o loop dos outros mangás
-                gerenciarNotificacaoComRetry(bot, updatedManga, novoCapitulo, novaURLSakura);
-            }
-        } catch (err) {
-            console.error(`[Monitor] Erro processando ${manga.titulo}:`, err);
+// --- FUNÇÃO ISOLADA: Processa UMA obra ---
+async function processarMangaUnico(bot: Client, manga: MangaEntry) {
+    try {
+        // --- VERIFICAÇÃO PARALELA (Sakura E MangaPark) ---
+        const [statusSakura, statusMP] = await Promise.all([
+            verificarSeSaiuNoSakura(manga.urlBase, manga.lastChapter),
+            manga.urlMangapark ? verificarSeSaiuNoMangaPark(manga.urlMangapark, manga.lastChapter) : Promise.resolve({ saiu: false, numero: 0, link: "", titulo: null })
+        ]);
+
+        let novoCapitulo = 0;
+        let detectouNovo = false;
+
+        // Define qual é o novo capítulo (pega o maior se ambos saíram, ou o que saiu)
+        if (statusSakura.saiu) {
+            novoCapitulo = statusSakura.numero;
+            detectouNovo = true;
+        } else if (statusMP.saiu) {
+            novoCapitulo = statusMP.numero;
+            detectouNovo = true;
         }
+
+        if (detectouNovo && novoCapitulo > manga.lastChapter) {
+            console.log(`[Monitor] 🚨 Novo Capítulo Detectado: ${manga.titulo} - Cap ${novoCapitulo}`);
+            
+            // Lógica de URLs e Banco
+            const novaURLSakuraBase = statusSakura.saiu 
+                ? statusSakura.novaUrl 
+                : construirUrlSakuraTeorica(manga.urlBase, novoCapitulo);
+            
+            const linkSakuraInicial = statusSakura.saiu ? statusSakura.novaUrl : null;
+            const linkMPInicial = statusMP.saiu ? statusMP.link : null;
+            const tituloCap = statusMP.titulo || null;
+
+            const updatedManga: MangaEntry = {
+                ...manga,
+                lastChapter: novoCapitulo,
+                urlBase: novaURLSakuraBase
+            };
+            addManga(updatedManga);
+
+            // Inicia notificação (sem await para não travar o lote atual)
+            gerenciarNotificacaoBilateral(
+                bot, 
+                updatedManga, 
+                novoCapitulo, 
+                linkSakuraInicial, 
+                linkMPInicial, 
+                tituloCap
+            );
+        }
+
+    } catch (err) {
+        console.error(`[Monitor] Erro processando ${manga.titulo}:`, err);
     }
 }
 
-// --- FUNÇÃO CORE: Gerencia a espera e as tentativas ---
-async function gerenciarNotificacaoComRetry(
+// --- FUNÇÃO AUXILIAR: Constrói URL do Sakura baseada em lógica padrão ---
+function construirUrlSakuraTeorica(urlBaseAntiga: string, novoCap: number): string {
+    const numeroFormatado = novoCap.toString().replace('.', '-');
+    const match = urlBaseAntiga.match(/(\d+(?:[-]\d+)?)\/?$/);
+    if (match) {
+        return urlBaseAntiga.replace(match[1], numeroFormatado);
+    }
+    return `${urlBaseAntiga.replace(/\/+$/, "")}/${numeroFormatado}/`;
+}
+
+
+// --- LÓGICA BILATERAL DE RETRY ---
+async function gerenciarNotificacaoBilateral(
     bot: Client, 
     manga: MangaEntry, 
     capitulo: number, 
-    urlSakura: string
+    linkSakuraJaEncontrado: string | null,
+    linkMPJaEncontrado: string | null,
+    tituloCapitulo: string | null
 ) {
-    console.log(`[Monitor] 🔎 Tentativa 1 (Imediata) para ${manga.titulo}...`);
-    
-    // TENTATIVA 1: Imediata
-    let resultadoMP = await tentarAcharLinkMangaPark(manga, capitulo);
+    console.log(`[Notificação] Iniciando processo para ${manga.titulo} (Cap ${capitulo})`);
 
-    if (resultadoMP.encontrou) {
-        // Cenário Perfeito: Achou na hora
-        await enviarMensagemFinal(bot, manga, capitulo, urlSakura, resultadoMP.link, resultadoMP.titulo, false);
+    let linkSakuraFinal = linkSakuraJaEncontrado;
+    let linkMPFinal = linkMPJaEncontrado;
+    let linkMPTitulo = tituloCapitulo;
+
+    if (linkSakuraFinal && linkMPFinal) {
+        await enviarMensagemFinal(bot, manga, capitulo, linkSakuraFinal, linkMPFinal, linkMPTitulo, false);
         return;
     }
 
-    // Se não achou, entra no modo de espera (Retry Logic)
-    console.log(`[Monitor] ⏳ Link MP não encontrado para ${manga.titulo}. Aguardando 10 minutos...`);
-    
-    // ESPERA 1: 10 Minutos (600.000 ms)
+    // MODO DE ESPERA (RETRY)
+    console.log(`[Notificação] ⏳ Faltam links para ${manga.titulo}. Aguardando 10 minutos...`);
     await sleep(10 * 60 * 1000); 
 
-    console.log(`[Monitor] 🔎 Tentativa 2 (Após 10min) para ${manga.titulo}...`);
-    resultadoMP = await tentarAcharLinkMangaPark(manga, capitulo);
+    console.log(`[Notificação] 🔎 Tentativa 2 para ${manga.titulo}...`);
+    
+    if (!linkSakuraFinal) {
+        const resSakura = await verificarSeSaiuNoSakura(manga.urlBase, capitulo);
+        if (resSakura.saiu) linkSakuraFinal = resSakura.novaUrl;
+    }
+    if (!linkMPFinal && manga.urlMangapark) {
+        const resMP = await buscarLinkNaObra(manga.urlMangapark, capitulo);
+        if (resMP.link !== manga.urlMangapark) {
+            linkMPFinal = resMP.link;
+            linkMPTitulo = resMP.titulo;
+        }
+    }
 
-    if (resultadoMP.encontrou) {
-        // Cenário: Achou depois de 10 min
-        await enviarMensagemFinal(bot, manga, capitulo, urlSakura, resultadoMP.link, resultadoMP.titulo, false);
+    if (linkSakuraFinal && linkMPFinal) {
+        await enviarMensagemFinal(bot, manga, capitulo, linkSakuraFinal, linkMPFinal, linkMPTitulo, false);
         return;
     }
 
-    // Se AINDA não achou, envia com link Genérico
-    console.log(`[Monitor] ⚠️ Ainda não encontrado. Enviando link genérico e agendando verificação final.`);
-    const linkGenerico = manga.urlMangapark || `https://mangapark.net/search?q=${encodeURIComponent(manga.titulo)}`;
+    // ENVIO COM LINK GENÉRICO
+    console.log(`[Notificação] ⚠️ ${manga.titulo} incompleto. Enviando genéricos.`);
     
-    // Envia a mensagem com link genérico e guarda o objeto da mensagem
-    const mensagemEnviada = await enviarMensagemFinal(bot, manga, capitulo, urlSakura, linkGenerico, null, true);
+    const linkSakuraParaEnvio = linkSakuraFinal || manga.urlBase;
+    const linkMPParaEnvio = linkMPFinal || manga.urlMangapark || `https://mangapark.net/search?q=${encodeURIComponent(manga.titulo)}`;
+    const usouGenerico = !linkSakuraFinal || !linkMPFinal;
 
-    if (!mensagemEnviada) return; // Se falhou ao enviar, aborta
+    const mensagemEnviada = await enviarMensagemFinal(
+        bot, manga, capitulo, linkSakuraParaEnvio, linkMPParaEnvio, linkMPTitulo, usouGenerico
+    );
 
-    // ESPERA 2: Mais 10 Minutos
-    console.log(`[Monitor] ⏳ Aguardando mais 10 minutos para tentar editar a mensagem...`);
-    await sleep(10 * 60 * 1000);
+    if (!mensagemEnviada || !usouGenerico) return; 
 
-    // TENTATIVA FINAL: Editar a mensagem
-    console.log(`[Monitor] 🔎 Tentativa 3 (Final - Edição) para ${manga.titulo}...`);
-    resultadoMP = await tentarAcharLinkMangaPark(manga, capitulo);
+    // TENTATIVA FINAL (EDIÇÃO)
+    console.log(`[Notificação] Aguardando mais 10 minutos para edição (${manga.titulo})...`);
+    await sleep(10 * 60 * 1000); 
 
-    if (resultadoMP.encontrou) {
-        console.log(`[Monitor] ✨ Link encontrado! Editando mensagem antiga...`);
+    console.log(`[Notificação] 🔎 Tentativa 3 (Edição) para ${manga.titulo}...`);
+    let houveMelhoria = false;
+
+    if (!linkSakuraFinal) {
+        const resSakura = await verificarSeSaiuNoSakura(manga.urlBase, capitulo);
+        if (resSakura.saiu) {
+            linkSakuraFinal = resSakura.novaUrl;
+            houveMelhoria = true;
+        }
+    }
+    if (!linkMPFinal && manga.urlMangapark) {
+        const resMP = await buscarLinkNaObra(manga.urlMangapark, capitulo);
+        if (resMP.link !== manga.urlMangapark) {
+            linkMPFinal = resMP.link;
+            houveMelhoria = true;
+        }
+    }
+
+    if (houveMelhoria) {
+        console.log(`[Notificação] ✨ Links encontrados para ${manga.titulo}! Editando.`);
+        const novoLinkSakura = linkSakuraFinal || linkSakuraParaEnvio;
+        const novoLinkMP = linkMPFinal || linkMPParaEnvio;
+        
         try {
-            // Reconstrói os botões com o novo link
-            const novaRow = construirBotoes(urlSakura, resultadoMP.link, manga.urlMangataro);
+            const novaRow = construirBotoes(novoLinkSakura, novoLinkMP, manga.urlMangataro);
             await mensagemEnviada.edit({ components: [novaRow] });
-            console.log(`[Monitor] Mensagem editada com sucesso!`);
         } catch (error) {
-            console.error(`[Monitor] Erro ao editar mensagem:`, error);
-        }
-    } else {
-        console.log(`[Monitor] Link não encontrado na tentativa final. Mantendo link genérico.`);
-    }
-}
-
-// --- HELPER: Busca no MangaPark ---
-async function tentarAcharLinkMangaPark(manga: MangaEntry, capitulo: number) {
-    if (manga.urlMangapark) {
-        const res = await buscarLinkNaObra(manga.urlMangapark, capitulo);
-        // Verifica se o link retornado é específico (contém 'chapter' ou similar e não é igual a URL base exata se ela for limpa)
-        // A função buscarLinkNaObra já retorna o link base se não achar, então checamos se mudou algo
-        if (res.link !== manga.urlMangapark && res.link.length > manga.urlMangapark.length) {
-             return { encontrou: true, link: res.link, titulo: res.titulo };
+            console.error(`[Notificação] Falha ao editar mensagem:`, error);
         }
     }
-    return { encontrou: false, link: "", titulo: null };
 }
 
 // --- HELPER: Construtor de Botões ---
 function construirBotoes(linkSakura: string, linkMP: string, linkMangataro?: string): ActionRowBuilder<ButtonBuilder> {
     const buttons: ButtonBuilder[] = [];
 
-    // Botão Sakura
-    buttons.push(new ButtonBuilder().setLabel('Ler no Sakura').setEmoji('🌸').setStyle(ButtonStyle.Link).setURL(linkSakura));
+    const isGenericSakura = !/\d+(-?\d+)?\/?$/.test(linkSakura); 
+    buttons.push(
+        new ButtonBuilder()
+            .setLabel(isGenericSakura ? 'Sakura (Obra)' : 'Ler no Sakura')
+            .setEmoji('🌸')
+            .setStyle(ButtonStyle.Link)
+            .setURL(linkSakura)
+    );
 
-    // Botão MangaPark
     if (linkMP && linkMP.startsWith('http')) {
-        const isGeneric = !linkMP.includes('chapter') && !linkMP.includes('ch.'); // Detecção simples se é genérico
-        const emoji = isGeneric ? '🏠' : '🎢'; // Casa se for home, Montanha Russa se for cap
-        const label = isGeneric ? 'Ler no Mangapark' : 'Ler no Mangapark';
+        const isGenericMP = !linkMP.includes('chapter') && !linkMP.includes('ch.') && !/\d$/.test(linkMP);
+        const emoji = isGenericMP ? '🏠' : '🎢'; 
+        const label = isGenericMP ? 'MangaPark (Obra)' : 'Ler no Mangapark';
 
         buttons.push(new ButtonBuilder().setLabel(label).setEmoji(emoji).setStyle(ButtonStyle.Link).setURL(linkMP));
     }
 
-    // Botão MangaTaro
     if (linkMangataro && linkMangataro.startsWith('http')) {
         buttons.push(new ButtonBuilder().setLabel('Ler no MangaTaro').setEmoji('🎴').setStyle(ButtonStyle.Link).setURL(linkMangataro));
     }
@@ -141,7 +216,7 @@ function construirBotoes(linkSakura: string, linkMP: string, linkMangataro?: str
     return new ActionRowBuilder<ButtonBuilder>().addComponents(buttons);
 }
 
-// --- HELPER: Envio de Mensagem (Centralizado) ---
+// --- HELPER: Envio de Mensagem ---
 async function enviarMensagemFinal(
     bot: Client, 
     manga: MangaEntry, 
@@ -152,10 +227,8 @@ async function enviarMensagemFinal(
     ehLinkGenerico: boolean
 ): Promise<Message | null> {
     
-    // Preparar Texto
     let mensagemFinal = manga.mensagemPadrao || "O **capítulo {capitulo}** de @{titulo}, **\"{nome_capitulo}\"** já está disponível.\n\n*aproveitem e boa leitura.*";
 
-    // Tratamento do nome do capítulo
     const temTituloReal = tituloCapitulo && tituloCapitulo.trim() !== "" && !/^cap[íi]tulo\s*\d+$/i.test(tituloCapitulo);
 
     if (temTituloReal) {
@@ -175,14 +248,11 @@ async function enviarMensagemFinal(
         .replace(/🎴 \*\*MangaTaro:\*\*/g, '')
         .replace(/[ \t]{2,}/g, " ").replace(/ ,/g, ",");
 
-    // Construir Botões
     const row = construirBotoes(linkSakura, linkMP, manga.urlMangataro);
 
     try {
         const channel = await bot.channels.fetch(manga.channelId);
         if (channel && channel.isTextBased()) {
-            
-            // Tratamento de Menção de Cargo
             if ('guild' in channel) {
                 const guild = (channel as TextChannel).guild;
                 const role = guild.roles.cache.find((r: any) => r.name.toLowerCase() === manga.titulo.toLowerCase());
@@ -193,7 +263,6 @@ async function enviarMensagemFinal(
 
             const payload: any = { content: mensagemFinal.trim(), components: [row] };
 
-            // Tratamento de Imagem
             if (manga.imagem) {
                 if (manga.imagem.startsWith('http')) {
                     const embed = new EmbedBuilder().setColor(0x2b2d31).setImage(manga.imagem);
@@ -204,11 +273,15 @@ async function enviarMensagemFinal(
             }
 
             const msgEnviada = await (channel as TextChannel).send(payload);
-            console.log(`[Monitor] Mensagem enviada para ${manga.titulo} (Link Genérico: ${ehLinkGenerico})`);
+            console.log(`[Monitor] Notificação enviada para ${manga.titulo}`);
             return msgEnviada;
         }
-    } catch (error) {
-        console.error(`[Monitor] Erro envio Discord:`, error);
+    } catch (error: any) {
+        if (error.code === 50001) {
+            console.error(`❌ [Monitor] ERRO DE PERMISSÃO: O bot não consegue postar no canal ${manga.channelId}.`);
+        } else {
+            console.error(`[Monitor] Erro envio Discord:`, error);
+        }
     }
     return null;
 }

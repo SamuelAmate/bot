@@ -1,10 +1,9 @@
 import { createResponder, ResponderType } from "#base";
-import { addManga, getMangas, MangaEntry } from '../../utils/StateManager.js';
+import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
-import axios from 'axios';
 import { pipeline } from 'stream/promises';
-import { SendableChannels } from "discord.js";
+import { addManga, getMangas, MangaEntry } from '../../utils/StateManager.js';
 
 const IMAGE_DIR = path.resolve(process.cwd(), 'imagens');
 
@@ -24,36 +23,35 @@ createResponder({
             const imagens = fields.getUploadedFiles("imagem"); 
             const imagemAnexada = imagens?.first(); 
 
-            const canaisSelecionados = fields.getSelectedChannels("canal");
-            const canalDestino = canaisSelecionados ? canaisSelecionados.first() as SendableChannels : null;
-            
-            if (!canalDestino) {
-                await interaction.editReply({ content: "❌ Canal inválido." });
+            // --- 1. Busca a Obra Original Primeiro ---
+            // Precisamos dela antes para saber qual é o canal antigo
+            const mangas = getMangas();
+            const mangaOriginal = mangas.find(m => m.titulo === tituloObraOriginal);
+
+            if (!mangaOriginal) {
+                await interaction.editReply({ content: `❌ Erro crítico: Obra "${tituloObraOriginal}" não encontrada no banco.` });
                 return;
             }
 
-            // --- CORREÇÃO REGEX (Suporta decimais e traços) ---
+            // --- 2. Lógica do Canal (Novo ou Mantém Velho) ---
+            const canaisSelecionados = fields.getSelectedChannels("canal");
+            const novoCanal = canaisSelecionados ? canaisSelecionados.first() : null;
+            
+            // Se o usuário selecionou algo, usa o ID novo. Se não, mantém o ID antigo.
+            const canalFinalId = novoCanal ? novoCanal.id : mangaOriginal.channelId;
+
+            // --- 3. Processamento de URL ---
             const match = novaUrlCompleta.match(/(\d+(?:[-.]\d+)?)\/?$/); 
             if (!match) {
                 await interaction.editReply({ content: "❌ A URL precisa terminar com o número do capítulo (ex: /69/ ou /69-1/)." });
                 return;
             }
 
-            // Converte traço pra ponto e salva como número
             const novoCap = parseFloat(match[1].replace('-', '.'));
-            
             let novaUrlBase = novaUrlCompleta.substring(0, novaUrlCompleta.length - match[0].length);
             novaUrlBase = novaUrlBase.replace(/\/+$/, "") + "/";
 
-            const mangas = getMangas();
-            const mangaOriginal = mangas.find(m => m.titulo === tituloObraOriginal);
-
-            if (!mangaOriginal) {
-                await interaction.editReply({ content: `❌ Obra não encontrada.` });
-                return;
-            }
-
-            // Lógica de Imagem (Mantida igual ao original)
+            // --- 4. Processamento de Imagem ---
             let caminhoImagemFinal = mangaOriginal.imagem || ""; 
             if (imagemAnexada) {
                 try {
@@ -72,19 +70,20 @@ createResponder({
                 }
             }
 
+            // --- 5. Salvar ---
             const updatedManga: MangaEntry = {
                 ...mangaOriginal,
                 urlBase: novaUrlBase,
                 lastChapter: novoCap, 
                 mensagemPadrao: novaMensagem || undefined,
-                imagem: caminhoImagemFinal ,
-                channelId: canalDestino.id,
+                imagem: caminhoImagemFinal,
+                channelId: canalFinalId 
             };
             
             addManga(updatedManga);
 
             await interaction.editReply({
-                content: `✅ **${mangaOriginal.titulo}** editada!\n**Monitorando a partir do:** Capítulo ${novoCap}`
+                content: `✅ **${mangaOriginal.titulo}** editada!\n**Monitorando:** Capítulo ${novoCap}\n**Canal:** <#${canalFinalId}>`
             });
 
         } catch (error) {

@@ -69,7 +69,7 @@ createCommand({
         if (manga.urlMangapark && manga.urlMangapark.startsWith('http')) {
             buttons.push(
                 new ButtonBuilder()
-                    .setLabel('Mangapark')
+                    .setLabel('Ler no Mangapark')
                     .setEmoji('🎢')
                     .setStyle(ButtonStyle.Link)
                     .setURL(manga.urlMangapark)
@@ -80,7 +80,7 @@ createCommand({
         if (manga.urlMangataro && manga.urlMangataro.startsWith('http')) {
             buttons.push(
                 new ButtonBuilder()
-                    .setLabel('MangaTaro')
+                    .setLabel('Ler no MangaTaro')
                     .setEmoji('🎴')
                     .setStyle(ButtonStyle.Link)
                     .setURL(manga.urlMangataro)

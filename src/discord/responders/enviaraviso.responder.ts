@@ -81,8 +81,8 @@ createResponder({
                 await axios.post(FLARESOLVERR_API, { cmd: 'sessions.create', session: sessionID });
 
                 // Tenta até 3 vezes (reduzi para 3 para ser mais ágil)
-                for (let tentativa = 1; tentativa <= 3; tentativa++) {
-                    console.log(`[DEBUG] Tentativa ${tentativa}/3 buscando site...`);
+                for (let tentativa = 1; tentativa <= 5; tentativa++) {
+                    console.log(`[DEBUG] Tentativa ${tentativa}/5 buscando site...`);
 
                     try {
                         const response = await axios.post(FLARESOLVERR_API, {

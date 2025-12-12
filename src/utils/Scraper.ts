@@ -12,11 +12,17 @@ export async function wakeUpRender(): Promise<void> {
             maxTimeout: 10000 
         });
         if (res.data.status === 'ok') {
-             console.log("[System] Flaresolverr está online e pronto!");
+            console.log("[System] Flaresolverr está online e pronto!");
         }
     } catch (error) {
         console.error("[System] Falha ao conectar no Flaresolverr.");
     }
+}
+
+function gerarUrlEspelho(url: string): string | null {
+    if (url.includes('mangapark.io')) return url.replace('mangapark.io', 'mangapark.net');
+    if (url.includes('mangapark.net')) return url.replace('mangapark.net', 'mangapark.io');
+    return null; // Não é mangapark ou formato desconhecido
 }
 
 // --- LÓGICA DE CAPÍTULOS (Decimais + Inteiros) ---
@@ -61,6 +67,8 @@ export async function verificarSeSaiuNoSakura(urlBaseSakura: string, ultimoCapit
                 urlParaTestar = `${urlBaseSakura.replace(/\/+$/, "")}/${numeroFormatadoURL}/`;
             }
 
+            console.log(`[Sakura] Testando Cap ${proximoNumero} em: ${urlParaTestar}`);
+
             const html = await requestFlaresolverr(urlParaTestar, sessionID);
 
             if (html) {
@@ -72,6 +80,7 @@ export async function verificarSeSaiuNoSakura(urlBaseSakura: string, ultimoCapit
                 const regexTitle = new RegExp(`(?:Cap|Capítulo|Ch|Chapter).*?${numRegex}`, 'i');
 
                 if (regexTitle.test(title) && !title.includes("Página não encontrada")) {
+                    console.log(`[Sakura] ✅ Encontrado: Cap ${proximoNumero}!`);
                     return { saiu: true, numero: proximoNumero, novaUrl: urlParaTestar };
                 }
             }
@@ -83,6 +92,57 @@ export async function verificarSeSaiuNoSakura(urlBaseSakura: string, ultimoCapit
     }
 
     return { saiu: false, numero: ultimoCapitulo, novaUrl: urlBaseSakura };
+}
+
+export async function verificarSeSaiuNoMangaPark(urlMangaPark: string, ultimoCapitulo: number): Promise<{ saiu: boolean, numero: number, link: string, titulo: string | null }> {
+    if (!urlMangaPark) return { saiu: false, numero: ultimoCapitulo, link: "", titulo: null };
+
+    const listaDeTestes = gerarCandidatos(ultimoCapitulo);
+    const sessionID = `mp_scan_${Date.now()}`;
+
+    try {
+        console.log(`[MangaPark] Acessando original: ${urlMangaPark} (Busca: ${listaDeTestes.join(', ')})`);
+        // --- TENTATIVA 1: URL ORIGINAL ---
+        let html = await requestFlaresolverr(urlMangaPark, sessionID);
+        
+        if (html) {
+            for (const proximoNumero of listaDeTestes) {
+                const resultado = analisarHtmlMangaPark(html, urlMangaPark, proximoNumero);
+                if (resultado.encontrou) {
+                    console.log(`[MangaPark] Encontrado: Cap ${proximoNumero} (Link: ${resultado.link})`);
+                    return { saiu: true, numero: proximoNumero, link: resultado.link, titulo: resultado.titulo };
+                }
+            }
+        }
+
+        // --- TENTATIVA 2: URL ESPELHO (Fallback) ---
+        // Se chegou aqui, não achou na original. Vamos tentar trocar .io por .net (ou vice-versa)
+        const urlEspelho = gerarUrlEspelho(urlMangaPark);
+        
+        if (urlEspelho && urlEspelho !== urlMangaPark) {
+            // console.log(`[MangaPark] Tentando mirror: ${urlEspelho}`);
+            html = await requestFlaresolverr(urlEspelho, sessionID);
+
+            if (html) {
+                for (const proximoNumero of listaDeTestes) {
+                    const resultado = analisarHtmlMangaPark(html, urlEspelho, proximoNumero);
+                    if (resultado.encontrou) {
+                        console.log(`[MangaPark] Encontrado no espelho (.net/.io)!`);
+                        return { saiu: true, numero: proximoNumero, link: resultado.link, titulo: resultado.titulo };
+                    }
+                }
+            } else {
+                console.log(`[MangaPark] ❌ Falha ao carregar original (HTML vazio ou erro).`);
+            }
+        }
+
+    } catch(e) {
+        console.error(`[MangaPark Scan] Erro: ${e}`);
+    } finally {
+        destroySession(sessionID);
+    }
+
+    return { saiu: false, numero: ultimoCapitulo, link: "", titulo: null };
 }
 
 // --- FUNÇÃO 2: O BUSCADOR (MangaPark / Genérico) ---
@@ -167,6 +227,52 @@ export async function buscarLinkNaObra(urlPaginaObra: string, capituloAlvo: numb
     } finally {
         destroySession(sessionID);
     }
+}
+
+function analisarHtmlMangaPark(html: string, urlPaginaObra: string, capituloAlvo: number) {
+    const $ = cheerio.load(html);
+    let linkEncontrado = "";
+    let tituloEncontrado: string | null = null;
+
+    $('a').each((_, el) => {
+        if (linkEncontrado) return false;
+
+        const textoLink = $(el).text().trim().toLowerCase();
+        const href = $(el).attr('href');
+        if (!href) return;
+
+        const numString = capituloAlvo.toString().replace('.', '[.,-]');
+        const regexCapitulo = new RegExp(`(?:^|\\s|ch\\.?|chapter|vol\\.?\\s*\\d+)\\s*${numString}(?:\\s|:|$)`, 'i');
+
+        if (regexCapitulo.test(textoLink)) {
+            if (href.startsWith('http')) {
+                linkEncontrado = href;
+            } else {
+                const urlBase = new URL(urlPaginaObra).origin;
+                linkEncontrado = urlBase + href;
+            }
+
+            let rawText = $(el).find('span.opacity-50').text().trim(); 
+            if (!rawText) {
+                const vizinho = $(el).next('span');
+                if (vizinho.length > 0) rawText = vizinho.text().trim();
+            }
+            if (!rawText) {
+                const regexReplace = new RegExp(`(?:^|\\s|ch\\.?|chapter|vol\\.?\\s*\\d+)\\s*${numString}(?:\\s|:|$)`, 'gi');
+                rawText = $(el).text().replace(regexReplace, '').trim();
+            }
+
+            const tituloLimpo = rawText.replace(/^[:\s\-"\.]+|[:\s\-"\.]+$/g, '').trim();
+            if (tituloLimpo.length > 2 && !/^(new|up|hot|\d{1,2}\/\d{1,2})$/i.test(tituloLimpo)) {
+                tituloEncontrado = tituloLimpo;
+            }
+            
+            return false;
+        }
+    });
+
+    if (linkEncontrado) return { encontrou: true, link: linkEncontrado, titulo: tituloEncontrado };
+    return { encontrou: false, link: urlPaginaObra, titulo: null };
 }
 
 // Helpers
