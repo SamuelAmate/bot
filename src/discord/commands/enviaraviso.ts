@@ -24,7 +24,7 @@ createCommand({
                 ),
                 createLabel(
                     "Cargos Mencionados",
-                    "Por padrão ele puxa os cargos do Sandwiche, se voce preencher algo ele vai usar somente o cargo que você digitar.",
+                    "Por padrão puxa os cargos automatico, se preencher algo vai usar somente o cargo que você digitar",
                     createTextInput({
                         customId: "mencao_manual",
                         required: false,
