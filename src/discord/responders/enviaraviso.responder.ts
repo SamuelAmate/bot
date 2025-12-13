@@ -150,7 +150,7 @@ createResponder({
 
                 } catch (err) {
                     console.error("[DEBUG] ERRO NO PROCESSO DE SCRAPING:", err);
-                    await interaction.followUp({ content: "❌ Erro ao procurar cargos no Sandwiche, por favor tente novamente" });
+                    await interaction.followUp({ content: `❌ Erro ao procurar cargos no Sandwiche, por favor tente novamente\nSua mensagem era ${mensagemTexto}`});
                     return; 
                 } finally {
                     await axios.post(FLARESOLVERR_API, { cmd: 'sessions.destroy', session: sessionID }).catch(() => {});
